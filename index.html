@@ -2,279 +2,292 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<title>Fluid Fantasy — Wham‑O style (portrait)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no" />
+<title>Fluid Fantasy — Wham-O Style (Portrait)</title>
 <style>
   :root{
-    --glass-red:#c42727;
-    --rim:#ffffff;
-    --oil:#1b6cad;
-    --ui:rgba(255,255,255,0.92);
+    --tank-red:#c52a28;
+    --oil-blue:#1b84c6;
+    --bezel:#ffffff;
   }
-  html,body{height:100%;margin:0;background:#111;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif}
-  #wrap{height:100%;display:flex;align-items:center;justify-content:center}
-  canvas{touch-action:none}
-  #ui{
-    position:fixed;top:12px;left:12px;right:12px;display:flex;justify-content:space-between;gap:8px;pointer-events:none;
+  html,body{height:100%;margin:0;background:#111;color:#eee;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+  .wrap{
+    display:flex;align-items:center;justify-content:center;height:100%;
+    padding:10px;
+  }
+  .tank {
+    position:relative; width:min(92vw, 520px); height:calc(100vh - 110px);
+    max-height:860px; border-radius:26px; background:var(--tank-red);
+    box-shadow:inset 0 0 0 12px var(--bezel), 0 8px 24px rgba(0,0,0,.45);
+    overflow:hidden;
+  }
+  canvas{position:absolute; inset:0; width:100%; height:100%; display:block;}
+  .instr{
+    position:absolute; left:0; right:0; bottom:8px; text-align:center;
+    font-size:14px; opacity:.8; text-shadow:0 1px 2px #000;
   }
   .btn{
-    pointer-events:auto;border:0;border-radius:14px;padding:10px 14px;background:var(--ui);
-    font-weight:600;box-shadow:0 2px 16px rgba(0,0,0,.25);cursor:pointer
+    position:absolute; z-index:5; top:8px; padding:8px 12px;
+    background:rgba(255,255,255,.15); border:1px solid rgba(255,255,255,.35);
+    color:#fff; border-radius:12px; backdrop-filter: blur(6px);
+    -webkit-tap-highlight-color: transparent;
   }
-  #hint{position:fixed;bottom:10px;left:0;right:0;text-align:center;color:#fff;opacity:.85;font-size:13px}
+  .btn:hover{background:rgba(255,255,255,.22)}
+  .btn.left{left:10px}
+  .btn.right{right:10px}
+  .btn.mid{left:50%; transform:translateX(-50%);}
 </style>
 </head>
 <body>
-<div id="wrap">
-  <canvas id="canvas" width="900" height="1600"></canvas>
+<div class="wrap">
+  <div class="tank" id="tank">
+    <button class="btn left" id="fsBtn">Enter Fullscreen</button>
+    <button class="btn mid" id="motionBtn">Enable Motion</button>
+    <button class="btn right" id="resetBtn">Reset</button>
+    <canvas id="c"></canvas>
+    <div class="instr">Wham-O style • **Tilt** to flow • **Double-tap** to flip gravity</div>
+  </div>
 </div>
-<div id="ui">
-  <button id="fsBtn" class="btn">Enter Fullscreen</button>
-  <button id="resetBtn" class="btn">Reset</button>
-</div>
-<div id="hint">Wham‑O style • Tilt to flow • Double‑tap to flip</div>
 
 <script>
-(() => {
-  const DPR = Math.min(2, window.devicePixelRatio || 1);
-  const canvas = document.getElementById('canvas');
-  const ctx = canvas.getContext('2d');
+/* --------- basic setup --------- */
+const tank = document.getElementById('tank');
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W=0,H=0, DPR = Math.max(1, window.devicePixelRatio||1);
 
-  // Logical canvas size (portrait phone)
-  const W = 360, H = 640;
-  const RIM = 18;          // white bezel thickness
-  const GLASS = 10;        // red glass inset from rim
+function fit(){
+  const r = tank.getBoundingClientRect();
+  W = Math.floor(r.width * DPR); H = Math.floor(r.height * DPR);
+  canvas.width = W; canvas.height = H;
+}
+fit(); addEventListener('resize', fit);
 
-  // Inner playable rect
-  const minX = RIM + GLASS, maxX = W - RIM - GLASS;
-  const minY = RIM + GLASS, maxY = H - RIM - GLASS;
+/* --------- world & parameters --------- */
+const OIL_COLOR = '#1b84c6';
+const TANK_BG   = '#c52a28';
+const OUTLINE   = '#1a1a1a';
 
-  // Resize to fit screen
-  function fit() {
-    const pad = 8;
-    const aw = innerWidth - pad*2, ah = innerHeight - pad*2;
-    const aspect = W/H;
-    let vw = aw, vh = vw/aspect;
-    if (vh > ah) { vh = ah; vw = vh*aspect; }
-    canvas.style.width = vw + 'px';
-    canvas.style.height = vh + 'px';
-    canvas.width = Math.round(W*DPR);
-    canvas.height = Math.round(H*DPR);
-    ctx.setTransform(DPR,0,0,DPR,0,0);
-  }
-  fit(); addEventListener('resize', fit);
+const N_PART = 120;           // total “drops”
+const MASS    = 1;            // per particle mass (uniform)
+const G_SCALE = 0.0006;       // gravity strength
+const DAMP    = 0.985;        // velocity damping (viscosity feel)
+const COHESION= 0.00025;      // how strongly droplets pull together
+const REPULSE = 0.0007;       // short-range repulsion (prevents collapse)
+const RADIUS  = 10 * DPR;     // visual radius of each particle
+const FIELD_R = RADIUS*1.25;  // influence radius for blobby look
+const WALL_PAD= 14 * DPR;
 
-  // Obstacles (white bars/pegs)
-  const bars = [
-    [minX+12, 110, maxX-80, 110],
-    [minX+36, 170, minX+220, 170],
-    [minX+28, 300, minX+210, 300],
-    [maxX-100, 360, maxX-20, 360],
-    [minX+10, H-110, maxX-10, H-110],
+/* device gravity vector (updated by tilt or double-tap flip) */
+let g = {x:0, y: G_SCALE}; // default: gently downward
+let flipped = false;
+
+/* white obstacle bars (x,y,w,h) in device pixels; we define in percents then scale */
+function pct(x, y, w, h){
+  return [x*W, y*H, w*W, h*H];
+}
+let obstacles = [];
+function buildObstacles(){
+  obstacles = [
+    pct(0.06,0.12, 0.88, 0.015),
+    pct(0.10,0.30, 0.40, 0.015),
+    pct(0.58,0.38, 0.32, 0.015),
+    pct(0.18,0.54, 0.64, 0.015),
+    pct(0.10,0.77, 0.80, 0.015),
   ];
-  const pegs = [
-    {x:minX+255, y:110, r:7},
-    {x:minX+270, y:110, r:7},
-    {x:minX+248, y:150, r:7},
-    {x:minX+270, y:220, r:8},
-  ];
+}
+buildObstacles();
+addEventListener('resize', buildObstacles);
 
-  // Fluid parameters (globby, slow)
-  const N = 140;                 // droplets
-  const PR = 5.5;                // render radius
-  const SR = 30;                 // neighbor radius
-  const COHESION = 0.70;         // surface tension
-  const REPULSION = 1100;        // core repulsion
-  const VISCOSITY = 0.35;        // thickness
-  const AIR_DRAG = 0.06;         // global damping
-  const WALL_FRICTION = 0.35;    // slide slowly
-  const BOUNCE = 30;             // tiny bounce
+/* --------- particle pool (fixed amount of oil) --------- */
+const P = new Array(N_PART).fill(0).map(()=>({
+  x: 0, y: 0, vx: 0, vy: 0
+}));
 
-  // Gravity via tilt
-  const G0 = 380;                // accel scale
-  let g = {x:0, y:1};
-  let gravityFlip = 1;
-
-  function handleTilt(e){
-    const beta  = (e.beta  || 0) * Math.PI/180;
-    const gamma = (e.gamma || 0) * Math.PI/180;
-    let gx = Math.sin(gamma);
-    let gy = Math.sin(beta);
-    const m = Math.hypot(gx, gy) || 1e-6;
-    gx /= m; gy /= m;
-    g.x = gx * gravityFlip;
-    g.y = gy * gravityFlip;
+function seedOil(){
+  // start as a fat puddle near the top
+  for(let i=0;i<N_PART;i++){
+    const spread = 0.06; // % of tank
+    P[i].x = (0.5 + (Math.random()-0.5)*spread) * W;
+    P[i].y = (0.2 + (Math.random()-0.5)*spread) * H;
+    P[i].vx = (Math.random()-0.5) * 0.3;
+    P[i].vy = (Math.random()-0.5) * 0.3;
   }
-  window.addEventListener('deviceorientation', handleTilt, true);
+}
+seedOil();
 
-  // Desktop/touch fallback
-  let dragging = false;
-  canvas.addEventListener('pointerdown', () => dragging = true);
-  canvas.addEventListener('pointerup',   () => dragging = false);
-  canvas.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    const r = canvas.getBoundingClientRect();
-    const cx = r.left + r.width/2, cy = r.top + r.height/2;
-    const gx = e.clientX - cx, gy = e.clientY - cy;
-    const m = Math.hypot(gx, gy) || 1;
-    g.x = (gx/m) * gravityFlip;
-    g.y = (gy/m) * gravityFlip;
-  });
-
-  // Double‑tap to flip gravity
-  let lastTap = 0;
-  canvas.addEventListener('touchend', () => {
-    const now = performance.now();
-    if (now - lastTap < 300) { gravityFlip *= -1; }
-    lastTap = now;
-  });
-
-  // Particles
-  const p = new Array(N).fill(0).map(()=> ({ x:0,y:0,vx:0,vy:0 }));
-  function seedTop(){
-    let i=0;
-    while(i<N){
-      const cols = 18, spacing = PR*1.9;
-      const row = Math.floor(i/cols);
-      const col = i % cols;
-      p[i].x = minX + 20 + col*spacing;
-      p[i].y = minY + 30 + row*spacing*0.9;
-      p[i].vx = p[i].vy = 0;
-      i++;
-    }
+/* --------- physics update --------- */
+function update(dt){
+  // pairwise forces: cohesion (longer range), repulsion (short)
+  for(let i=0;i<N_PART;i++){
+    let pi=P[i];
+    // gravity & damping
+    pi.vx = (pi.vx + g.x*dt) * DAMP;
+    pi.vy = (pi.vy + g.y*dt) * DAMP;
   }
-  seedTop();
+  for(let i=0;i<N_PART;i++){
+    const pi = P[i];
+    for(let j=i+1;j<N_PART;j++){
+      const pj = P[j];
+      let dx = pj.x - pi.x;
+      let dy = pj.y - pi.y;
+      let d2 = dx*dx + dy*dy;
+      if (d2 === 0) continue;
+      let d = Math.sqrt(d2);
+      // normalized
+      let ux = dx/d, uy = dy/d;
 
-  function collideWalls(pi){
-    if (pi.x < minX+PR){ pi.x = minX+PR; pi.vx *= -0.2; }
-    if (pi.x > maxX-PR){ pi.x = maxX-PR; pi.vx *= -0.2; }
-    if (pi.y < minY+PR){ pi.y = minY+PR; pi.vy *= -0.2; }
-    if (pi.y > maxY-PR){ pi.y = maxY-PR; pi.vy *= -0.2; }
-  }
-  function collideBars(pi){
-    for (let b of bars){
-      const x1=b[0], y1=b[1], x2=b[2], y2=b[3];
-      const dx = x2-x1, dy = y2-y1;
-      const L2 = dx*dx + dy*dy;
-      let t = ((pi.x-x1)*dx + (pi.y-y1)*dy) / L2;
-      t = Math.max(0, Math.min(1, t));
-      const cx = x1 + t*dx, cy = y1 + t*dy;
-      const nx = pi.x - cx, ny = pi.y - cy;
-      const dist = Math.hypot(nx, ny);
-      if (dist < PR+3){
-        const push = (PR+3 - dist) + 0.01;
-        const ux = (nx || 1e-6)/ (dist || 1e-6);
-        const uy = (ny || 1e-6)/ (dist || 1e-6);
-        pi.x += ux*push;
-        pi.y += uy*push;
-        pi.vx = pi.vx*(1 - WALL_FRICTION) + (-uy)*BOUNCE*0.01;
-        pi.vy = pi.vy*(1 - WALL_FRICTION) + (ux)*BOUNCE*0.01;
-      }
-    }
-    for (let peg of pegs){
-      const nx = pi.x - peg.x, ny = pi.y - peg.y;
-      const dist = Math.hypot(nx, ny);
-      const R = peg.r + PR;
-      if (dist < R){
-        const push = (R - dist) + 0.01;
-        const ux = (nx || 1e-6)/(dist || 1e-6);
-        const uy = (ny || 1e-6)/(dist || 1e-6);
-        pi.x += ux*push;
-        pi.y += uy*push;
-        pi.vx = pi.vx*(1 - WALL_FRICTION) + (ux)*BOUNCE*0.02;
-        pi.vy = pi.vy*(1 - WALL_FRICTION) + (uy)*BOUNCE*0.02;
+      // cohesion (pull together slightly)
+      const fCoh = COHESION * Math.min(d, 120*DPR);
+      pi.vx += fCoh*ux; pi.vy += fCoh*uy;
+      pj.vx -= fCoh*ux; pj.vy -= fCoh*uy;
+
+      // repulsion at close range (prevents total collapse)
+      const minD = RADIUS*0.9;
+      if(d < minD){
+        const fRep = REPULSE*(1 - d/minD);
+        pi.vx -= fRep*ux; pi.vy -= fRep*uy;
+        pj.vx += fRep*ux; pj.vy += fRep*uy;
       }
     }
   }
 
-  let last = performance.now();
-  function step(now){
-    const dt = Math.min(0.033, (now - last)/1000);
-    last = now;
+  // integrate & collisions
+  for(let i=0;i<N_PART;i++){
+    let p=P[i];
+    p.x += p.vx*dt*60;
+    p.y += p.vy*dt*60;
 
-    // Pairwise interactions
-    for (let i=0;i<N;i++){
-      const pi = p[i];
-      for (let j=i+1;j<N;j++){
-        const pj = p[j];
-        let dx = pj.x - pi.x, dy = pj.y - pi.y;
-        const d = Math.hypot(dx, dy) || 1e-6;
-        if (d < SR){
-          const n = 1 - (d/SR);
-          const rep = REPULSION * Math.max(0, (PR*1.6 - d)/PR*1.6);
-          const coh = COHESION * n * 10;
-          const rvx = pj.vx - pi.vx, rvy = pj.vy - pi.vy;
-          const visc = VISCOSITY * n;
-          const ux = dx/d, uy = dy/d;
-          const fx = (ux * (coh - rep) + rvx * (-visc));
-          const fy = (uy * (coh - rep) + rvy * (-visc));
-          pi.vx -= fx*dt; pi.vy -= fy*dt;
-          pj.vx += fx*dt; pj.vy += fy*dt;
-        }
+    // walls (rounded-ish tank interior)
+    if(p.x < WALL_PAD){ p.x = WALL_PAD; p.vx *= -0.25; }
+    if(p.x > W-WALL_PAD){ p.x = W-WALL_PAD; p.vx *= -0.25; }
+    if(p.y < WALL_PAD){ p.y = WALL_PAD; p.vy *= -0.25; }
+    if(p.y > H-WALL_PAD){ p.y = H-WALL_PAD; p.vy *= -0.25; }
+
+    // obstacles (AABB with friction)
+    for(const ob of obstacles){
+      const [ox,oy,ow,oh]=ob;
+      if(p.x>ox && p.x<ox+ow && p.y>oy-8 && p.y<oy+oh+8){
+        // resolve vertical first (feels like sliding on bars)
+        if(p.y < oy+oh/2){ p.y = oy-1; p.vy *= -0.15; p.vx *= 0.92; }
+        else { p.y = oy+oh+1; p.vy *= -0.15; p.vx *= 0.92; }
       }
     }
+  }
+}
 
-    for (let i=0;i<N;i++){
-      const pi = p[i];
-      pi.vx += g.x * G0 * dt;
-      pi.vy += g.y * G0 * dt;
-      pi.vx *= (1 - AIR_DRAG * dt);
-      pi.vy *= (1 - AIR_DRAG * dt);
-      pi.x += pi.vx * dt;
-      pi.y += pi.vy * dt;
-      collideBars(pi);
-      collideWalls(pi);
+/* --------- rendering --------- */
+function drawBackground(){
+  // red tank interior
+  ctx.fillStyle = TANK_BG;
+  ctx.fillRect(0,0,W,H);
+
+  // white obstacle bars
+  ctx.fillStyle = '#fff';
+  for(const [x,y,w,h] of obstacles){
+    // two-layer: subtle shadow + white bar
+    ctx.fillRect(x, y+h*0.55, w, h*0.45);
+    ctx.fillRect(x, y, w, h);
+  }
+}
+
+// metaball-ish: draw blurred circles with additive blend, then colorize
+function drawOil(){
+  ctx.save();
+  // layer to build “field”
+  ctx.globalCompositeOperation='lighter';
+  for(const p of P){
+    const r = FIELD_R;
+    const grad = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+    grad.addColorStop(0, 'rgba(50,120,180,0.65)');
+    grad.addColorStop(0.6, 'rgba(50,120,180,0.20)');
+    grad.addColorStop(1, 'rgba(50,120,180,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI*2); ctx.fill();
+  }
+
+  // slight outline “meniscus”
+  ctx.globalCompositeOperation='source-over';
+  ctx.lineWidth = 2*DPR;
+  ctx.strokeStyle = 'rgba(10,10,10,0.35)';
+
+  // coarse marching: sample grid & draw iso-contours by threshold approximation
+  // (cheap trick: paint a semi-transparent blue coat; outline by compositing pass)
+  ctx.globalAlpha=0.95;
+  ctx.fillStyle = OIL_COLOR;
+  // tint the accumulated field to uniform blue
+  ctx.globalCompositeOperation='source-atop';
+  ctx.fillRect(0,0,W,H);
+
+  // soft outline
+  ctx.globalCompositeOperation='source-over';
+  ctx.strokeStyle='rgba(0,0,0,0.28)';
+  ctx.lineWidth=1.5*DPR;
+  // draw “suggested” outline by redrawing circles thinly (fast approximation)
+  ctx.beginPath();
+  for(const p of P){ ctx.moveTo(p.x+RADIUS,p.y); ctx.arc(p.x,p.y,RADIUS,0,Math.PI*2); }
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+let last=performance.now();
+function loop(t){
+  const dt = Math.min(0.04, (t-last)/1000); last=t;
+  update(dt);
+  drawBackground();
+  drawOil();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* --------- device orientation → gravity --------- */
+function setGravityFromOrientation(e){
+  // gamma: left/right tilt, beta: front/back
+  const beta = (e.beta||0);   // -180..180
+  const gamma = (e.gamma||0); // -90..90
+  // map to canvas x/y (portrait)
+  let gx =  Math.sin(gamma*Math.PI/180) * G_SCALE;
+  let gy =  Math.sin(beta *Math.PI/180) * G_SCALE;
+  if(flipped){ gx*=-1; gy*=-1; }
+  g.x = gx; g.y = gy;
+}
+
+const motionBtn = document.getElementById('motionBtn');
+motionBtn.addEventListener('click', async ()=>{
+  // iOS requires a gesture to request permission
+  try{
+    if (typeof DeviceMotionEvent !== 'undefined' &&
+        typeof DeviceMotionEvent.requestPermission === 'function'){
+      const r = await DeviceMotionEvent.requestPermission();
+      if(r!=='granted') throw new Error('Motion permission not granted');
     }
+  }catch(e){}
+  addEventListener('deviceorientation', setGravityFromOrientation, true);
+  motionBtn.style.display='none';
+});
 
-    render();
-    requestAnimationFrame(step);
+// Double-tap to flip gravity 180° (like turning the toy upside-down quickly)
+let lastTap=0;
+canvas.addEventListener('touchend', (e)=>{
+  const now = performance.now();
+  if(now-lastTap < 350){
+    flipped = !flipped;
   }
+  lastTap = now;
+});
 
-  function render(){
-    ctx.clearRect(0,0,W,H);
-    ctx.fillStyle = '#000'; ctx.fillRect(0,0,W,H);
-    // Rim
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--rim').trim();
-    roundRect(ctx, RIM/2, RIM/2, W-RIM, H-RIM, 26); ctx.fill();
-    // Glass
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--glass-red').trim();
-    roundRect(ctx, RIM/2 + GLASS, RIM/2 + GLASS, W-RIM-GLASS*2, H-RIM-GLASS*2, 20); ctx.fill();
-    // Obstacles
-    ctx.lineWidth = 6; ctx.lineCap='round'; ctx.strokeStyle='#fff';
-    for (let b of bars){ ctx.beginPath(); ctx.moveTo(b[0],b[1]); ctx.lineTo(b[2],b[3]); ctx.stroke(); }
-    ctx.fillStyle='#fff';
-    for (let k of pegs){ ctx.beginPath(); ctx.arc(k.x,k.y,k.r,0,Math.PI*2); ctx.fill(); }
-    // Fluid
-    ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue('--oil').trim();
-    ctx.strokeStyle = 'rgba(0,0,0,0.22)';
-    for (let i=0;i<N;i++){
-      const pi=p[i]; ctx.beginPath(); ctx.arc(pi.x,pi.y,PR,0,Math.PI*2); ctx.fill(); ctx.lineWidth=1; ctx.stroke();
-    }
-  }
-  function roundRect(ctx,x,y,w,h,r){
-    ctx.beginPath();
-    ctx.moveTo(x+r,y);
-    ctx.arcTo(x+w,y,x+w,y+h,r);
-    ctx.arcTo(x+w,y+h,x,y+h,r);
-    ctx.arcTo(x,y+h,x,y,r);
-    ctx.arcTo(x,y,x+w,y,r);
-    ctx.closePath();
-  }
+/* --------- UI: fullscreen & reset --------- */
+document.getElementById('fsBtn').onclick = async ()=>{
+  if(!document.fullscreenElement){ await tank.requestFullscreen?.(); }
+  else { await document.exitFullscreen?.(); }
+};
+document.getElementById('resetBtn').onclick = ()=>{
+  seedOil();
+};
 
-  // UI
-  const fsBtn=document.getElementById('fsBtn');
-  fsBtn.addEventListener('click', async ()=>{
-    const el=document.documentElement;
-    if(!document.fullscreenElement){ await el.requestFullscreen?.(); fsBtn.textContent='Exit Fullscreen'; }
-    else{ await document.exitFullscreen?.(); fsBtn.textContent='Enter Fullscreen'; }
-  });
-  document.getElementById('resetBtn').addEventListener('click', seedTop);
-  document.addEventListener('fullscreenchange', ()=>{
-    fsBtn.textContent = document.fullscreenElement ? 'Exit Fullscreen' : 'Enter Fullscreen';
-  });
-
-  requestAnimationFrame(step);
-})();
+/* prevent scrolling bounce while interacting */
+document.addEventListener('touchmove', e=>{ e.preventDefault(); }, {passive:false});
 </script>
 </body>
 </html>
