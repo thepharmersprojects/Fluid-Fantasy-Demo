@@ -1,1 +1,474 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Oil Toy — top pool → drips → bottom pool (tilt)</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1220;color:#cfe7ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  #wrap{position:fixed;inset:0;display:grid;grid-template-rows:auto 1fr auto}
+  header,footer{padding:10px 14px;background:#0e162a;border-bottom:1px solid #1e2b4a}
+  footer{border-top:1px solid #1e2b4a;border-bottom:none}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button,input[type=range]{appearance:none;border:none;border-radius:8px;padding:8px 12px;background:#243557;color:#cfe7ff;font-weight:600}
+  input[type=range]{width:150px}
+  .hint{opacity:.85;font-size:12px}
 
+  /* Stage stack */
+  #stage{position:relative;width:100%;height:100%;background:linear-gradient(#0b1220,#0b1220 70%,#0a101b)}
+  #c{position:absolute;inset:20px;width:calc(100% - 40px);height:calc(100% - 40px);display:block;border-radius:14px;z-index:1}
+
+  /* Red acrylic above blob */
+  .red-sheet{position:absolute;inset:20px;border-radius:14px;pointer-events:none;z-index:3;
+    background:linear-gradient(180deg,rgba(215,30,30,.22),rgba(215,30,30,.18));
+    mix-blend-mode:multiply;
+    backdrop-filter:blur(1.2px) saturate(115%) brightness(105%);
+    box-shadow:0 0 0 1px rgba(120,0,0,.35) inset,0 12px 20px rgba(255,40,40,.06) inset}
+
+  /* Clear plastic frame on top */
+  .frame{position:absolute;inset:0;pointer-events:none;z-index:4;border-radius:22px;border:10px solid rgba(255,255,255,.14);
+    box-shadow:0 0 0 2px rgba(255,255,255,.10) inset,0 0 0 1px rgba(0,0,0,.55),0 18px 40px rgba(0,0,0,.45);
+    background:radial-gradient(120% 100% at 50% -10%,rgba(255,255,255,.18),rgba(255,255,255,0) 55%) border-box,
+               radial-gradient(140% 100% at 50% 110%,rgba(255,255,255,.10),rgba(255,255,255,0) 60%) border-box}
+  .inner-lip{position:absolute;inset:12px;border-radius:18px;pointer-events:none;z-index:2;
+    box-shadow:0 0 0 10px rgba(255,255,255,.04) inset,0 0 0 2px rgba(0,0,0,.45) inset;
+    background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.02))}
+
+  #debug{font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#15213a;padding:6px 8px;border-radius:8px;opacity:.95}
+  .badge{background:#1e3157;border-radius:8px;padding:6px 8px}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <header class="row">
+    <strong>Oil Toy</strong>
+    <button id="enableTilt">Enable Motion</button>
+    <label>Drip Rate <input id="rate" type="range" min="0" max="100" value="42"></label>
+    <label>Viscosity <input id="visc" type="range" min="0" max="100" value="70"></label>
+    <label>Surface Tension <input id="tension" type="range" min="0" max="100" value="65"></label>
+    <label>Gravity <input id="gscale" type="range" min="10" max="200" value="85"></label>
+    <span class="badge">Mass top:<span id="mt">0</span> • drops:<span id="md">0</span> • bottom:<span id="mb">0</span></span>
+    <span id="debug" class="hint">Ready</span>
+  </header>
+
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div class="inner-lip"></div>
+    <div class="red-sheet"></div>
+    <div class="frame"></div>
+  </div>
+
+  <footer class="row">
+    <span class="hint">Starts as a top pool, drips as tilt increases, merges into a bottom pool. Serve via HTTPS/localhost, then tap “Enable Motion”.</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  // ========== CANVAS ==========
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let W=0,H=0,dpr=1;
+
+  function resize(){
+    dpr = Math.max(1, Math.min(2, window.devicePixelRatio||1));
+    const r = canvas.getBoundingClientRect();
+    W=r.width; H=r.height;
+    canvas.width = Math.floor(W*dpr); canvas.height = Math.floor(H*dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+    layoutObstacles();
+    initFields();
+    initMass();
+  }
+  window.addEventListener('resize', resize, {passive:true});
+
+  // ========== PHYSICS TUNABLES ==========
+  // Visuals
+  const OIL = '#2a8cff';
+  const EDGE = 'rgba(0,0,0,0.95)';
+
+  // Pools are rendered with a metaball/contour; droplets are circles with a black outline.
+  // Mass accounting (rough but steady)
+  const MASS_TOTAL = 1_000;     // total "volume" units we preserve
+  let massTop = 700;            // start all mass at top pool
+  let massBottom = 0;
+  let massDrops = MASS_TOTAL - massTop - massBottom; // will be 300 initially as reserve converting to top
+
+  // Drop characteristics
+  let DRIP_RATE = 0.42;         // baseline [0..1]
+  let GRAVITY_SCALE = 0.85;
+  let VISCOSITY = 0.70;         // damping
+  let TENSION = 0.65;           // how strongly drops stay round / merge
+
+  // Motion
+  let gravity = {x:0, y:1};     // unit down (will be replaced by tilt * scale)
+
+  // Obstacles
+  const pegs = [];
+  const rails = [];
+  function layoutObstacles(){
+    pegs.length = 0; rails.length = 0;
+    const inset=20, left=inset, right=W-inset, top=inset, bottom=H-inset;
+    const railW=10;
+    rails.push({x:left+30, y:top+40, w:railW, h:(bottom-top)-120});
+    rails.push({x:right-30-railW, y:top+40, w:railW, h:(bottom-top)-120});
+    const cols=3, rows=8, spreadX=60, startY=top+90, gapY=(bottom-top-180)/rows, cx=W/2;
+    for (let r=0;r<rows;r++){
+      for (let c=0;c<cols;c++){
+        const offset = (r%2 ? -spreadX*0.5 : 0);
+        pegs.push({x: cx + (c-1)*spreadX + offset, y: startY + r*gapY, r: 10});
+      }
+    }
+  }
+
+  // ========== MASS / EMITTER ==========
+  function initMass(){
+    massTop = MASS_TOTAL; massBottom = 0; massDrops = 0;
+  }
+
+  // Drip nozzle position — a little left of center near top pool edge
+  function nozzle(){
+    const x = W*0.52, y = 20 + 60;
+    return {x, y};
+  }
+
+  // Droplet store
+  const drops = []; // {x,y,vx,vy,r,m}
+  function emitDrop(dt){
+    if (massTop <= 0) return;
+
+    // emission rate scales with gravity "downwardness"
+    const gm = Math.hypot(gravity.x, gravity.y) || 1;
+    const gx = gravity.x/gm, gy = gravity.y/gm;
+    const downness = Math.max(0, gy*1.0 + Math.abs(gx)*0.15); // mostly vertical, slight sideways helps
+    const rate = DRIP_RATE * (0.35 + 0.65*downness);          // 0.35..~1.0 of base
+
+    // accumulate fractional mass
+    dropAccumulator += rate * dt * 120; // 120 is a tuning factor
+    while (dropAccumulator >= 1){
+      dropAccumulator -= 1;
+      // each drop consumes some mass, radius scales with mass
+      const m = 8 + Math.random()*5;         // mass units for this drop
+      if (massTop - m < 0) break;
+      massTop -= m;
+      massDrops += m;
+      const r = 6 + (m-8)*0.25;              // visual radius (rough)
+      const n = nozzle();
+      const jitter = (Math.random()-0.5)*3;
+      drops.push({ x:n.x + jitter, y:n.y, vx:gx*0.3, vy:gy*0.3, r, m });
+    }
+  }
+  let dropAccumulator = 0;
+
+  // ========== TOP/BOTTOM POOLS (metaball field + marching squares) ==========
+  let cell = 6, cols=0, rows=0, fieldTop=null, fieldBot=null, iso=1.0;
+  function initFields(){
+    cols = Math.floor((W-40)/cell)+1;
+    rows = Math.floor((H-40)/cell)+1;
+    fieldTop = new Float32Array(cols*rows);
+    fieldBot = new Float32Array(cols*rows);
+    iso = 0.85;
+  }
+  function idx(x,y){ return y*cols + x; }
+
+  function addBlobToField(field, cx, cy, radius, power){
+    const sx=20, sy=20;
+    const r2 = radius*radius, inv = 1/r2;
+    const minx = Math.max(0, Math.floor((cx - radius - sx)/cell));
+    const maxx = Math.min(cols-1, Math.ceil ((cx + radius - sx)/cell));
+    const miny = Math.max(0, Math.floor((cy - radius - sy)/cell));
+    const maxy = Math.min(rows-1, Math.ceil ((cy + radius - sy)/cell));
+    for (let gy=miny; gy<=maxy; gy++){
+      const gyPos = sy + gy*cell;
+      for (let gx=minx; gx<=maxx; gx++){
+        const gxPos = sx + gx*cell;
+        const dx = gxPos - cx, dy = gyPos - cy;
+        const d2 = dx*dx + dy*dy;
+        if (d2 <= r2) field[idx(gx,gy)] += Math.exp(-d2*inv)*power;
+      }
+    }
+  }
+
+  function buildPoolFields(){
+    fieldTop.fill(0); fieldBot.fill(0);
+    // Map mass to size: area ~ mass; radius ~ sqrt(mass)
+    const k = 0.18; // scaling tuner
+    if (massTop > 0){
+      const r = Math.sqrt(massTop)*k + 28;
+      addBlobToField(fieldTop, W*0.5, 20+70, r, 1.35);
+    }
+    if (massBottom > 0){
+      const r = Math.sqrt(massBottom)*k + 28;
+      addBlobToField(fieldBot, W*0.5, H-20-60, r, 1.35);
+    }
+  }
+
+  function march(field){
+    const paths = [];
+    for (let y=0; y<rows-1; y++){
+      for (let x=0; x<cols-1; x++){
+        const a = field[idx(x,y)]     > iso ? 1 : 0;
+        const b = field[idx(x+1,y)]   > iso ? 1 : 0;
+        const c = field[idx(x+1,y+1)] > iso ? 1 : 0;
+        const d = field[idx(x,y+1)]   > iso ? 1 : 0;
+        const state = (a<<0)|(b<<1)|(c<<2)|(d<<3);
+        if (state===0 || state===15) continue;
+
+        const fx = t => 20 + (x+t)*cell;
+        const fy = t => 20 + (y+t)*cell;
+        const lerp = (f1,f2)=>{ const v1=f1-iso, v2=f2-iso; return Math.max(0,Math.min(1, v1/(v1-v2 + 1e-6))); };
+
+        const f = [field[idx(x,y)],field[idx(x+1,y)],field[idx(x+1,y+1)],field[idx(x,y+1)]];
+        const E = {
+          top:   {x: fx(lerp(f[0],f[1])), y: fy(0)},
+          right: {x: fx(1),               y: fy(lerp(f[1],f[2]))},
+          bottom:{x: fx(lerp(f[3],f[2])), y: fy(1)},
+          left:  {x: fx(0),               y: fy(lerp(f[0],f[3]))}
+        };
+
+        switch(state){
+          case 1:  paths.push([E.left,E.top]); break;
+          case 2:  paths.push([E.top,E.right]); break;
+          case 3:  paths.push([E.left,E.right]); break;
+          case 4:  paths.push([E.right,E.bottom]); break;
+          case 5:  paths.push([E.left,E.top],[E.right,E.bottom]); break;
+          case 6:  paths.push([E.top,E.bottom]); break;
+          case 7:  paths.push([E.left,E.bottom]); break;
+          case 8:  paths.push([E.bottom,E.left]); break;
+          case 9:  paths.push([E.bottom,E.top]); break;
+          case 10: paths.push([E.bottom,E.right],[E.top,E.left]); break;
+          case 11: paths.push([E.bottom,E.right]); break;
+          case 12: paths.push([E.right,E.left]); break;
+          case 13: paths.push([E.top,E.right]); break;
+          case 14: paths.push([E.left,E.top]); break;
+        }
+      }
+    }
+    return stitch(paths);
+  }
+  function stitch(seg){
+    const map=new Map();
+    const key=p=>p.x.toFixed(2)+','+p.y.toFixed(2);
+    for (const [a,b] of seg){
+      const ka=key(a), kb=key(b);
+      if (!map.has(ka)) map.set(ka,[]);
+      if (!map.has(kb)) map.set(kb,[]);
+      map.get(ka).push(b); map.get(kb).push(a);
+    }
+    const visited=new Set(), paths=[];
+    for (const [startKey] of map){
+      if (visited.has(startKey)) continue;
+      const path=[];
+      let curr=startKey, prev=null;
+      while(curr && !visited.has(curr)){
+        visited.add(curr);
+        const [x,y]=curr.split(',').map(Number);
+        path.push({x,y});
+        const nexts=map.get(curr)||[];
+        let next=null;
+        for (const n of nexts){
+          const nk=key(n);
+          if (nk!==prev){ next=nk; break; }
+        }
+        prev=curr; curr=next;
+      }
+      if (path.length>2) paths.push(path);
+    }
+    return paths;
+  }
+
+  // ========== COLLISIONS / MOTION ==========
+  function collidePeg(pt, peg){
+    const dx=pt.x-peg.x, dy=pt.y-peg.y; const d=Math.hypot(dx,dy);
+    const minR = peg.r + pt.r*0.8;
+    if (d < minR){
+      const nx=(dx||0.0001)/(d||1), ny=(dy||0.0001)/(d||1);
+      const push=(minR-d);
+      pt.x += nx*push; pt.y += ny*push;
+      // project velocity along gravity only (no ricochet)
+      const gm=Math.hypot(gravity.x,gravity.y)||1, gx=gravity.x/gm, gy=gravity.y/gm;
+      const dot=pt.vx*gx + pt.vy*gy; pt.vx=gx*dot; pt.vy=gy*dot;
+    }
+  }
+  function collideRail(pt, rail){
+    const pad=pt.r*0.8;
+    if (pt.x > rail.x-pad && pt.x < rail.x+rail.w+pad && pt.y > rail.y-pad && pt.y < rail.y+rail.h+pad){
+      if (Math.abs(pt.x - rail.x) < Math.abs(pt.x - (rail.x+rail.w))) pt.x = rail.x - pad;
+      else pt.x = rail.x + rail.w + pad;
+      const gm=Math.hypot(gravity.x,gravity.y)||1, gx=gravity.x/gm, gy=gravity.y/gm;
+      const dot=pt.vx*gx + pt.vy*gy; pt.vx=gx*dot; pt.vy=gy*dot;
+    }
+  }
+
+  // ========== SIM ==========
+  const mtEl=document.getElementById('mt'), mdEl=document.getElementById('md'), mbEl=document.getElementById('mb');
+  function step(dt){
+    // gravity vector
+    const gm = Math.hypot(gravity.x, gravity.y) || 1;
+    const gx = gravity.x/gm * GRAVITY_SCALE;
+    const gy = gravity.y/gm * GRAVITY_SCALE;
+
+    // Emit from the top pool
+    if (massTop > 0) emitDrop(dt);
+
+    // Move drops
+    for (let i=drops.length-1; i>=0; i--){
+      const d = drops[i];
+      // accel strictly along gravity
+      d.vx = (d.vx + gx*dt) * (1 - VISCOSITY*0.35);
+      d.vy = (d.vy + gy*dt) * (1 - VISCOSITY*0.35);
+
+      // clamp speed
+      const sp = Math.hypot(d.vx,d.vy), maxSp = 7.0;
+      if (sp > maxSp){ d.vx *= maxSp/sp; d.vy *= maxSp/sp; }
+
+      d.x += d.vx*dt*60; d.y += d.vy*dt*60;
+
+      // bounds (no bounce)
+      const L=20+d.r, T=20+d.r, Rb=W-20-d.r, Bb=H-20-d.r;
+      if (d.x < L) d.x=L; if (d.x > Rb) d.x=Rb;
+      if (d.y < T) d.y=T; if (d.y > Bb) d.y=Bb;
+
+      // obstacles
+      for (const r of rails) collideRail(d,r);
+      for (const p of pegs) collidePeg(d,p);
+
+      // merge into bottom pool if touching bottom zone
+      const bottomY = H-20-60; // pool center y, surface above this
+      if (d.y > bottomY - d.r*0.5){
+        // absorb gradually (looks syrupy)
+        const absorb = Math.min(d.m, d.m * (0.35 + 0.65*TENSION));
+        d.m -= absorb; massDrops -= absorb; massBottom += absorb;
+        // shrink radius as mass goes
+        d.r = Math.max(3, d.r * Math.sqrt(Math.max(0.0001, d.m/(d.m+absorb))));
+        if (d.m <= 0.5){
+          drops.splice(i,1);
+          continue;
+        }
+      }
+    }
+
+    // Keep the readout in sync
+    mtEl.textContent = Math.round(massTop);
+    mdEl.textContent = Math.round(massDrops);
+    mbEl.textContent = Math.round(massBottom);
+
+    // Guard against any drift (numerical)
+    const sum = massTop + massBottom + massDrops;
+    const drift = MASS_TOTAL - sum;
+    if (Math.abs(drift) > 0.001){
+      // distribute tiny correction into the largest pool
+      if (massBottom >= massTop){
+        massBottom += drift;
+      } else {
+        massTop += drift;
+      }
+    }
+  }
+
+  // ========== RENDER ==========
+  function draw(){
+    ctx.clearRect(0,0,W,H);
+
+    // Obstacles (subtle)
+    ctx.save(); ctx.globalAlpha=0.5;
+    for (const r of rails){ ctx.fillStyle='rgba(190,200,220,0.08)'; ctx.fillRect(r.x,r.y,r.w,r.h);
+      ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=2; ctx.strokeRect(r.x+1,r.y+1,r.w-2,r.h-2); }
+    for (const p of pegs){
+      ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.fillStyle='rgba(200,210,230,0.08)'; ctx.fill();
+      ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=2; ctx.stroke();
+    }
+    ctx.restore();
+
+    // Pools: build fields & contours, then fill blue and stroke black
+    buildPoolFields();
+
+    function drawField(field){
+      const paths = march(field);
+      if (!paths.length) return;
+      // Use largest path (ignore tiny islands)
+      let best=paths[0], areaMax=-1;
+      for (const p of paths){
+        let a=0; for (let i=0;i<p.length;i++){ const j=(i+1)%p.length; a += p[i].x*p[j].y - p[j].x*p[i].y; }
+        a=Math.abs(a)*0.5; if (a>areaMax){ areaMax=a; best=p; }
+      }
+      ctx.save();
+      ctx.fillStyle=OIL; ctx.strokeStyle=EDGE; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.moveTo(best[0].x,best[0].y);
+      for (let i=1;i<best.length;i++) ctx.lineTo(best[i].x,best[i].y);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+
+    // top first, then bottom (so drips can appear above)
+    if (massTop>0) drawField(fieldTop);
+    if (massBottom>0) drawField(fieldBot);
+
+    // Droplets: solid blue with thin black outline (round unless contacting)
+    ctx.save();
+    ctx.fillStyle = OIL; ctx.strokeStyle = EDGE; ctx.lineWidth = 1.8;
+    for (const d of drops){
+      ctx.beginPath(); ctx.arc(d.x,d.y,d.r,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ========== UI / TILT ==========
+  const debugEl=document.getElementById('debug');
+  const setDebug = t => debugEl.textContent = t;
+
+  const rateEl=document.getElementById('rate');
+  const viscEl=document.getElementById('visc');
+  const tensEl=document.getElementById('tension');
+  const gscaleEl=document.getElementById('gscale');
+
+  rateEl.addEventListener('input', ()=> DRIP_RATE = (+rateEl.value)/100 );
+  viscEl.addEventListener('input', ()=> VISCOSITY = (+viscEl.value)/100 );
+  tensEl.addEventListener('input', ()=> TENSION = (+tensEl.value)/100 );
+  gscaleEl.addEventListener('input',()=> GRAVITY_SCALE = (+gscaleEl.value)/100 );
+
+  function isSecure(){ return location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'; }
+  async function enableMotion(){
+    if (!isSecure()) setDebug('Tip: HTTPS/localhost needed for iPhone tilt.');
+    try{
+      if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) { try{ await DeviceMotionEvent.requestPermission(); }catch{} }
+      if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) { try{ await DeviceOrientationEvent.requestPermission(); }catch{} }
+      let got=false;
+      window.addEventListener('deviceorientation', e=>{
+        const gx=(e.gamma||0)/45, gy=(e.beta||0)/45; gravity.x=gx; gravity.y=gy; got=true;
+        setDebug(`gravity: (${(gx*GRAVITY_SCALE).toFixed(2)}, ${(gy*GRAVITY_SCALE).toFixed(2)})`);
+      }, true);
+      window.addEventListener('devicemotion', e=>{
+        const a=e.accelerationIncludingGravity||{}; const ax=(a.x||0)/9.81, ay=(a.y||0)/9.81; gravity.x=ax; gravity.y=ay; got=true;
+        setDebug(`gravity: (${(ax*GRAVITY_SCALE).toFixed(2)}, ${(ay*GRAVITY_SCALE).toFixed(2)})`);
+      }, true);
+      setTimeout(()=>{ if(!got) setDebug('No sensor events; ensure HTTPS & permissions.'); }, 1200);
+      const btn=document.getElementById('enableTilt'); btn.textContent='Motion Enabled'; btn.disabled=true;
+    }catch{ setDebug('Motion permission denied'); }
+  }
+  document.getElementById('enableTilt').addEventListener('click', enableMotion);
+
+  // ========== LOOP ==========
+  let last=performance.now();
+  function loop(now){
+    const dt = Math.min(0.035,(now-last)/1000); last=now;
+    step(dt);
+    draw();
+    requestAnimationFrame(loop);
+  }
+
+  // ========== START ==========
+  resize();
+  initMass();
+  requestAnimationFrame(loop);
+
+  if (!(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
+    setDebug('Serve over HTTPS (GitHub Pages) for tilt. Then tap “Enable Motion”.');
+  } else {
+    setDebug('Tilt to drip. Top pool starts full; bottom pool fills as drops merge.');
+  }
+})();
+</script>
+</body>
+</html>
