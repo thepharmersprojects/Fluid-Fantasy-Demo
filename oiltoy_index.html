@@ -1,5 +1,71 @@
 <!doctype html>
 <html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fluid Fantasy — Diagnostics</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1220;color:#cfe7ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  header{position:relative;z-index:1000;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px;background:#0e162a}
+  button{appearance:none;border:none;border-radius:8px;padding:8px 12px;background:#243557;color:#cfe7ff;font-weight:700;touch-action:manipulation;cursor:pointer}
+  #stage{position:relative;z-index:1;height:calc(100vh - 64px);display:grid;place-items:center}
+  #card{background:#132245;border-radius:14px;padding:18px 16px;max-width:520px;width:calc(100vw - 40px)}
+  code{background:#0d1933;padding:2px 6px;border-radius:6px}
+  .row{margin:.5rem 0}
+</style>
+<header>
+  <button id="btnAlert">Test Click</button>
+  <button id="btnMotion">Enable Motion</button>
+  <span id="stat" style="margin-left:6px;opacity:.9">Ready</span>
+</header>
+<div id="stage">
+  <div id="card">
+    <div class="row">Secure origin (https): <code id="secure">no</code></div>
+    <div class="row">Motion events flowing: <code id="motion">no</code></div>
+    <div class="row">Gravity (x,y): <code id="g">0, 1</code></div>
+    <div class="row">Tip: open this URL over <b>HTTPS</b>, then tap <b>Enable Motion</b> and allow.</div>
+  </div>
+</div>
+<script>
+  const secure = (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+  secure && (document.getElementById('secure').textContent = 'yes');
+
+  // 1) Button click test
+  document.getElementById('btnAlert').addEventListener('click', () => {
+    document.getElementById('stat').textContent = 'Click OK ✅';
+  });
+
+  // 2) Motion test
+  let motionFlow = false, gravity={x:0,y:1};
+  function updateHUD(){
+    document.getElementById('motion').textContent = motionFlow ? 'yes' : 'no';
+    document.getElementById('g').textContent = `${gravity.x.toFixed(2)}, ${gravity.y.toFixed(2)}`;
+  }
+  updateHUD();
+
+  async function enableMotion(){
+    try{
+      if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) {
+        try { await DeviceMotionEvent.requestPermission(); } catch {}
+      }
+      if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) {
+        try { await DeviceOrientationEvent.requestPermission(); } catch {}
+      }
+    }catch{}
+    window.addEventListener('deviceorientation', e => {
+      gravity.x = (e.gamma||0)/45; gravity.y = (e.beta||0)/45; motionFlow = true; updateHUD();
+    }, {passive:true});
+    window.addEventListener('devicemotion', e => {
+      const a = e.accelerationIncludingGravity || {};
+      gravity.x = (a.x||0)/9.81; gravity.y = (a.y||0)/9.81; motionFlow = true; updateHUD();
+    }, {passive:true});
+    const b = document.getElementById('btnMotion'); b.textContent = 'Motion Enabled'; b.disabled = true;
+    document.getElementById('stat').textContent = 'Waiting for sensor events…';
+    setTimeout(()=>{ if(!motionFlow) document.getElementById('stat').textContent = 'No motion events. Check Safari > Settings > Motion & Orientation Access.'; }, 1200);
+  }
+  document.getElementById('btnMotion').addEventListener('click', enableMotion);
+</script>
+</html><!doctype html>
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
