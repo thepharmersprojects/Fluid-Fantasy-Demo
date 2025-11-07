@@ -1,1 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Fluid Fantasy — Shelves + Visible Oil</title>
+<style>
+  :root{--t:env(safe-area-inset-top);--b:env(safe-area-inset-bottom);--l:env(safe-area-inset-left);--r:env(safe-area-inset-right)}
+  html,body{margin:0;height:100%;background:#0b1220;color:#cfe7ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  body{min-height:100dvh;display:flex;flex-direction:column}
+  header,footer{
+    position:relative;z-index:10;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
+    padding:12px calc(12px + var(--r)) 12px calc(12px + var(--l));background:#0e162a
+  }
+  button,input[type=range]{appearance:none;border:none;border-radius:8px;padding:8px 12px;background:#243557;color:#cfe7ff;font-weight:700;touch-action:manipulation;cursor:pointer}
+  input[type=range]{width:140px}
+  label{display:flex;align-items:center;gap:6px;font-size:12px;opacity:.95}
+  #hud{opacity:.9}
+  #diag{padding:10px calc(14px + var(--r)) 10px calc(14px + var(--l));background:#0e162a;border-top:1px solid #1e2b4a}
+  #card{background:#132245;border-radius:14px;padding:12px 14px;max-width:520px}
+  code{background:#0d1933;padding:2px 6px;border-radius:6px}
+  #stage{position:relative;flex:1;min-height:0}
+  .back{position:absolute;inset:20px;border-radius:24px;background:#d12a2a;box-shadow:0 0 0 2px rgba(0,0,0,.35) inset}
+  canvas{position:absolute;inset:20px;border-radius:24px;display:block;width:calc(100% - 40px);height:calc(100% - 40px)}
+  .frame{position:absolute;inset:0;border-radius:28px;border:12px solid rgba(255,255,255,.14);
+         box-shadow:0 0 0 2px rgba(255,255,255,.10) inset,0 0 0 1px rgba(0,0,0,.55),0 18px 40px rgba(0,0,0,.45);pointer-events:none}
+  footer{border-top:1px solid #1e2b4a;padding-bottom:calc(12px + var(--b))}
+</style>
+</head>
+<body>
+<header>
+  <strong>Fluid Fantasy</strong>
+  <button id="btnMotion">Enable Motion</button>
+  <label>Viscosity <input id="visc" type="range" min="0" max="100" value="65"></label>
+  <label>Tension <input id="tens" type="range" min="0" max="100" value="70"></label>
+  <label>Drip Tilt° <input id="tilt" type="range" min="4" max="30" value="14"></label>
+  <label>Sim Tilt <input id="simtilt" type="range" min="-100" max="100" value="0"></label>
+  <span id="hud">Ready</span>
+</header>
 
+<div id="diag">
+  <div id="card">
+    <div>Secure origin (https): <code id="secure">no</code></div>
+    <div>Motion events flowing: <code id="motion">no</code></div>
+    <div>Gravity used (x,y): <code id="g">0.00, 1.00</code></div>
+  </div>
+</div>
+
+<div id="stage">
+  <div class="back"></div>
+  <canvas id="c"></canvas>
+  <div class="frame"></div>
+</div>
+
+<footer>
+  <span>Shelves are drawn in bright lines. Blue oil starts visible. If motion stays <b>no</b>, use <b>Sim Tilt</b> to test slosh & drip. Mass conserved.</span>
+</footer>
+
+<script>
+(()=>{
+// -------------------- diagnostics / gravity --------------------
+const secure = (location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1');
+document.getElementById('secure').textContent = secure ? 'yes' : 'no';
+let sensorFlow=false, g={x:0,y:1}, useSim=true;
+const simEl=document.getElementById('simtilt');
+function updateHUD(){
+  const gx = useSim ? (+simEl.value/100) : g.x;
+  const gy = useSim ? Math.sqrt(Math.max(0,1 - Math.min(1,gx*gx))) : g.y;
+  document.getElementById('motion').textContent = sensorFlow ? 'yes' : 'no';
+  document.getElementById('g').textContent = `${gx.toFixed(2)}, ${gy.toFixed(2)}`;
+}
+simEl.oninput=updateHUD; updateHUD();
+
+document.getElementById('btnMotion').onclick = async ()=>{
+  try{
+    if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) { try{ await DeviceMotionEvent.requestPermission(); }catch{} }
+    if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) { try{ await DeviceOrientationEvent.requestPermission(); }catch{} }
+  }catch{}
+  addEventListener('deviceorientation', e => { g.x=(e.gamma||0)/45; g.y=(e.beta||0)/45; sensorFlow=true; useSim=false; }, {passive:true});
+  addEventListener('devicemotion', e => { const a=e.accelerationIncludingGravity||{}; g.x=(a.x||0)/9.81; g.y=(a.y||0)/9.81; sensorFlow=true; useSim=false; }, {passive:true});
+  const b=document.getElementById('btnMotion'); b.textContent='Motion Enabled'; b.disabled=true;
+};
+
+// -------------------- sliders --------------------
+const hud=document.getElementById('hud');
+let VISC=+document.getElementById('visc').value/100;
+let TENS=+document.getElementById('tens').value/100;
+let DRIP_ON=+document.getElementById('tilt').value, DRIP_OFF=Math.max(4,Math.round(DRIP_ON*0.65));
+document.getElementById('visc').oninput=e=>VISC=+e.target.value/100;
+document.getElementById('tens').oninput=e=>TENS=+e.target.value/100;
+document.getElementById('tilt').oninput=e=>{DRIP_ON=+e.target.value;DRIP_OFF=Math.max(4,Math.round(DRIP_ON*0.65));};
+
+// -------------------- canvas --------------------
+const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+let W=0,H=0,dpr=1;
+function resize(){
+  dpr=Math.max(1,Math.min(2,devicePixelRatio||1));
+  const r=canvas.getBoundingClientRect(); W=r.width; H=r.height;
+  canvas.width=Math.floor(W*dpr); canvas.height=Math.floor(H*dpr);
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  layout();
+}
+addEventListener('resize',resize,{passive:true}); resize();
+
+// -------------------- obstacles (BRIGHT SHELVES) --------------------
+const shelves=[], pegs=[]; let topShelf, midShelf, bottomShelf;
+function addShelf(px,py,pw){ shelves.push({x:20+(W-40)*px, y:20+(H-40)*py, w:(W-40)*pw}); }
+function addPeg(px,py,r){ pegs.push({x:20+(W-40)*px, y:20+(H-40)*py, r}); }
+
+function layout(){
+  shelves.length=0; pegs.length=0;
+  addShelf(0.08,0.14,0.84); topShelf=shelves[shelves.length-1];
+  addShelf(0.32,0.33,0.22); // short ledge
+  addShelf(0.58,0.41,0.24); // short ledge
+  addShelf(0.18,0.60,0.64); // long mid ledge
+  addShelf(0.14,0.86,0.72); bottomShelf=shelves[shelves.length-1];
+  addPeg(0.62,0.30,12); addPeg(0.70,0.54,10); addPeg(0.48,0.60,8); // bumps/obstacles
+}
+
+// -------------------- oil model --------------------
+const BLUE='#2a8cff', EDGE='rgba(0,0,0,.95)';
+const MASS_TOTAL=900;
+let massTop=MASS_TOTAL, massDrops=0, massBottom=0;
+const drops=[]; let meniscusPinned=true, dripPhase=0, dropAcc=0;
+
+function gUnit(){
+  const gx = useSim ? (+simEl.value/100) : g.x;
+  const gy = useSim ? Math.sqrt(Math.max(0,1 - Math.min(1,gx*gx))) : g.y;
+  const m = Math.hypot(gx,gy)||1; return {gx:gx/m, gy:gy/m};
+}
+function tiltDegX(){ const {gx}=gUnit(); return Math.asin(Math.min(1,Math.max(-1,Math.abs(gx))))*180/Math.PI; }
+
+function emitDrop(dt){
+  if (massTop<=0) return;
+  const td=tiltDegX();
+  if (meniscusPinned && td>=DRIP_ON) meniscusPinned=false;
+  else if (!meniscusPinned && td<=DRIP_OFF) meniscusPinned=true;
+  dripPhase = meniscusPinned ? Math.max(0,dripPhase-dt*2) : Math.min(1,dripPhase+dt*2);
+  if (meniscusPinned||dripPhase<=0) return;
+
+  const {gx,gy}=gUnit(); const down=Math.max(0, gy + Math.abs(gx)*.15);
+  dropAcc += (0.25+0.75*down)*dripPhase*(1-TENS*0.5)*dt*120;
+
+  if (dropAcc>=1 && massTop>0){
+    dropAcc-=1;
+    const m = Math.min(massTop, 8 + 8*TENS);
+    massTop -= m; massDrops += m;
+    const right = gx>=0;
+    const x = right ? (topShelf.x + topShelf.w - 14) : (topShelf.x + 14);
+    const y = topShelf.y;
+    drops.push({x,y,vx:gx*0.25,vy:gy*0.25,m,rx:6,ry:9});
+  }
+}
+
+const GRAVITY_SCALE=0.12, PLATE_DRAG=6.0;
+function collidePeg(d,pg){
+  const dx=d.x-pg.x,dy=d.y-pg.y,dist=Math.hypot(dx,dy),minR=pg.r+Math.max(d.rx,d.ry)*.85;
+  if(dist<minR){
+    const nx=(dx||.001)/(dist||1),ny=(dy||.001)/(dist||1),push=(minR-dist);
+    d.x+=nx*push; d.y+=ny*push;
+    const {gx,gy}=gUnit(); const dot=d.vx*gx+d.vy*gy; d.vx=gx*dot; d.vy=gy*dot;
+  }
+}
+function collideShelf(d,sh){
+  const t=6; // shelf thickness for collision
+  const L=sh.x,R=sh.x+sh.w,T=sh.y-t/2,B=sh.y+t/2;
+  const r=Math.max(d.rx,d.ry)*.85;
+  if (d.x>L-r && d.x<R+r && d.y>T-r && d.y<B+r){
+    // land on top of shelf
+    d.y=T-r; d.ry*=.88; d.rx*=1.06;
+    const {gx,gy}=gUnit(); const dot=d.vx*gx+d.vy*gy; d.vx=gx*dot; d.vy=gy*dot;
+  }
+}
+
+function step(dt){
+  emitDrop(dt);
+  const {gx,gy}=gUnit(); updateHUD();
+
+  for(let i=drops.length-1;i>=0;i--){
+    const d=drops[i];
+    d.vx=(d.vx+gx*GRAVITY_SCALE)*Math.exp(-(VISC*0.9+PLATE_DRAG)*dt);
+    d.vy=(d.vy+gy*GRAVITY_SCALE)*Math.exp(-(VISC*0.9+PLATE_DRAG)*dt);
+    const dot=d.vx*gx+d.vy*gy; d.vx=gx*dot; d.vy=gy*dot;
+    d.x+=d.vx*dt*60; d.y+=d.vy*dt*60;
+
+    const pad=Math.max(d.rx,d.ry)*.85;
+    if(d.x<20+pad)d.x=20+pad; if(d.x>W+20-pad)d.x=W+20-pad;
+    if(d.y<20+pad)d.y=20+pad; if(d.y>H+20-pad)d.y=H+20-pad;
+
+    for(const sh of shelves) collideShelf(d,sh);
+    for(const pg of pegs)     collidePeg(d,pg);
+
+    // merge into bottom pool
+    if(d.y>bottomShelf.y-8-d.ry*0.5){
+      const ab=Math.min(d.m, d.m*(0.25+0.65*TENS)*0.5);
+      d.m-=ab; massDrops-=ab; massBottom+=ab;
+      if(d.m<=.6){ drops.splice(i,1); continue; }
+    }
+
+    // teardrop shaping
+    const sp=Math.hypot(d.vx,d.vy), A=d.m;
+    let elong=Math.max(1.2,1.15+0.6*Math.tanh(sp*0.7)), rx=Math.sqrt(A/(Math.PI*elong)), ry=rx*elong;
+    if(ry>10){ ry=10; rx=A/(Math.PI*ry); } d.rx=rx; d.ry=ry;
+  }
+
+  // conserve mass
+  const total=massTop+massDrops+massBottom, drift=MASS_TOTAL-total;
+  if(Math.abs(drift)>1e-6){ (massTop>=massBottom?massTop:massBottom)+=drift; }
+}
+
+function rr(ctx,x,y,w,h,r){const R=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+R,y);ctx.arcTo(x+w,y,x+w,y+h,R);ctx.arcTo(x+w,y+h,x,y+h,R);ctx.arcTo(x,y+h,x,y,R);ctx.arcTo(x,y,x+w,y,R);ctx.closePath();}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+
+  // ***** SHELVES (always visible) *****
+  ctx.save();
+  ctx.strokeStyle='#f6f6f6';
+  ctx.lineWidth=6; ctx.lineCap='round';
+  shelves.forEach(s=>{ ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.x+s.w, s.y); ctx.stroke(); });
+  ctx.restore();
+
+  // pegs
+  ctx.save(); ctx.fillStyle='#f6f6f6'; pegs.forEach(p=>{ ctx.beginPath(); ctx.arc(p.x,p.y,6,0,Math.PI*2); ctx.fill(); }); ctx.restore();
+
+  // top pool (force visible)
+  const topH = Math.max(12, Math.min(90, massTop/30));
+  const topX = topShelf.x + 10, topW = topShelf.w - 20, topY = topShelf.y - topH + 3;
+  ctx.save(); rr(ctx, topX, topY, topW, topH, 10); ctx.fillStyle=BLUE; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle=EDGE; ctx.stroke(); ctx.restore();
+
+  // bottom pool
+  const botH = Math.max(10, Math.min(120, massBottom/35));
+  const botX = bottomShelf.x + 12, botW = bottomShelf.w - 24, botY = bottomShelf.y - botH + 3;
+  ctx.save(); rr(ctx, botX, botY, botW, botH, 12); ctx.fillStyle=BLUE; ctx.fill(); ctx.lineWidth=2; ctx.strokeStyle=EDGE; ctx.stroke(); ctx.restore();
+
+  // drops
+  const {gx,gy}=gUnit();
+  drops.forEach(d=>{
+    const px=-gy, py=gx, tail=Math.min(d.ry*.9,12);
+    const nx=d.x+gx*(d.ry+tail), ny=d.y+gy*(d.ry+tail), bx=d.x-gx*d.ry, by=d.y-gy*d.ry;
+    ctx.beginPath(); ctx.moveTo(bx+px*d.rx,by+py*d.rx);
+    ctx.quadraticCurveTo(d.x+px*d.rx,d.y+py*d.rx,nx,ny);
+    ctx.quadraticCurveTo(d.x-px*d.rx,d.y-py*d.rx,bx-px*d.rx,by-py*d.rx);
+    ctx.closePath(); ctx.fillStyle=BLUE; ctx.strokeStyle=EDGE; ctx.lineWidth=1.6; ctx.fill(); ctx.stroke();
+  });
+
+  hud.textContent = `Top:${Math.round(massTop)} Drops:${Math.round(massDrops)} Bottom:${Math.round(massBottom)} • Visc:${Math.round(VISC*100)} Tens:${Math.round(TENS*100)} • ${useSim?'SIM TILT':'SENSORS'}`;
+}
+
+// -------------------- loop --------------------
+let last=performance.now();
+function loop(now){ const dt=Math.min(.05,(now-last)/1000); last=now; step(dt); draw(); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
