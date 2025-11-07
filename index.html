@@ -3,78 +3,31 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Oil Blob – acrylic overlay + frame + fixed motion</title>
+<title>Oil Blob – obstacles, drain, acrylic, constant volume</title>
 <style>
-  html,body { margin:0; height:100%; background:#0b1220; color:#cfe7ff; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; }
-
-  /* Layout */
-  #wrap { position:fixed; inset:0; display:grid; grid-template-rows:auto 1fr auto; }
-
-  header,footer { padding:10px 14px; background:#0e162a; border-bottom:1px solid #1e2b4a; }
-  footer { border-top:1px solid #1e2b4a; border-bottom:none; }
-
-  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-  button, input[type=range] {
-    appearance:none; border:none; border-radius:8px; padding:8px 12px; background:#243557; color:#cfe7ff; font-weight:600;
-  }
-  input[type=range]{ width:160px; }
-  .hint { opacity:.85; font-size:12px }
-
-  /* Playfield stack: canvas (oil) under a red acrylic sheet; both inside a clear plastic frame */
-  #stage { position:relative; width:100%; height:100%; background:linear-gradient(#0b1220,#0b1220 70%,#0a101b); }
-
-  /* Clear plastic frame (glossy rim) around the edge */
-  .frame {
-    position:absolute; inset:0;
-    pointer-events:none;
-    border-radius:18px;
-    /* Outer glossy rim */
-    box-shadow:
-      0 0 0 8px rgba(255,255,255,0.05) inset,
-      0 0 0 2px rgba(255,255,255,0.08) inset,
-      0 0 0 1px rgba(0,0,0,0.35),
-      0 12px 30px rgba(0,0,0,0.35);
-    /* Inner bevel hint using gradient borders */
-    background:
-      radial-gradient(120% 100% at 50% -10%, rgba(255,255,255,0.20), rgba(255,255,255,0) 55%) border-box,
-      radial-gradient(140% 100% at 50% 110%, rgba(255,255,255,0.10), rgba(255,255,255,0) 60%) border-box;
-  }
-  /* Inner lip to sell the acrylic enclosure */
-  .inner-lip {
-    position:absolute; inset:10px;
-    border-radius:14px;
-    pointer-events:none;
-    box-shadow:
-      0 0 0 10px rgba(255,255,255,0.03) inset,
-      0 0 0 2px rgba(0,0,0,0.35) inset;
-    background:
-      linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)) ;
-  }
-
-  /* The oil canvas (under the red sheet) */
-  #c { position:absolute; inset:16px; width:calc(100% - 32px); height:calc(100% - 32px); display:block; border-radius:12px; }
-
-  /* Red acrylic sheet above the oil: translucent, soft, no black edges */
-  .red-sheet {
-    position:absolute; inset:16px;
-    border-radius:12px;
-    pointer-events:none;
-    /* Color and light glow – keep subtle so the blob reads through */
-    background: linear-gradient(180deg, rgba(255,20,20,0.18), rgba(255,20,20,0.14));
-    /* Multiply deepens the blues beneath into purplish tones like looking through red acrylic */
-    mix-blend-mode:multiply;
-    /* A bit of glassiness; some browsers require secure context */
-    backdrop-filter: saturate(120%) brightness(105%);
-    box-shadow:
-      0 0 0 1px rgba(120,0,0,0.25) inset,
-      0 12px 20px rgba(255,40,40,0.05) inset;
-  }
-
-  /* Tiny debug pill */
-  #debug {
-    font: 12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
-    background:#15213a; padding:6px 8px; border-radius:8px; opacity:.9;
-  }
+  html,body{margin:0;height:100%;background:#0b1220;color:#cfe7ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  #wrap{position:fixed;inset:0;display:grid;grid-template-rows:auto 1fr auto}
+  header,footer{padding:10px 14px;background:#0e162a;border-bottom:1px solid #1e2b4a}
+  footer{border-top:1px solid #1e2b4a;border-bottom:none}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button,input[type=range]{appearance:none;border:none;border-radius:8px;padding:8px 12px;background:#243557;color:#cfe7ff;font-weight:600}
+  input[type=range]{width:150px}
+  .hint{opacity:.85;font-size:12px}
+  #stage{position:relative;width:100%;height:100%;background:linear-gradient(#0b1220,#0b1220 70%,#0a101b)}
+  #c{position:absolute;inset:20px;width:calc(100% - 40px);height:calc(100% - 40px);display:block;border-radius:14px;z-index:1}
+  .red-sheet{position:absolute;inset:20px;border-radius:14px;pointer-events:none;z-index:3;
+    background:linear-gradient(180deg,rgba(215,30,30,.22),rgba(215,30,30,.18));mix-blend-mode:multiply;
+    backdrop-filter:blur(1.5px) saturate(115%) brightness(105%);
+    box-shadow:0 0 0 1px rgba(120,0,0,.35) inset,0 12px 20px rgba(255,40,40,.06) inset}
+  .frame{position:absolute;inset:0;pointer-events:none;z-index:4;border-radius:22px;border:10px solid rgba(255,255,255,.14);
+    box-shadow:0 0 0 2px rgba(255,255,255,.10) inset,0 0 0 1px rgba(0,0,0,.55),0 18px 40px rgba(0,0,0,.45);
+    background:radial-gradient(120% 100% at 50% -10%,rgba(255,255,255,.18),rgba(255,255,255,0) 55%) border-box,
+               radial-gradient(140% 100% at 50% 110%,rgba(255,255,255,.10),rgba(255,255,255,0) 60%) border-box}
+  .inner-lip{position:absolute;inset:12px;border-radius:18px;pointer-events:none;z-index:2;
+    box-shadow:0 0 0 10px rgba(255,255,255,.04) inset,0 0 0 2px rgba(0,0,0,.45) inset;
+    background:linear-gradient(180deg,rgba(255,255,255,.08),rgba(255,255,255,.02))}
+  #debug{font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#15213a;padding:6px 8px;border-radius:8px;opacity:.95}
+  .badge{background:#1e3157;border-radius:8px;padding:6px 8px}
 </style>
 </head>
 <body>
@@ -84,22 +37,24 @@
     <button id="enableTilt">Enable Motion</button>
     <button id="nudge">Nudge</button>
     <label>Viscosity <input id="visc" type="range" min="0" max="100" value="72"></label>
-    <label>Cohesion <input id="cohesion" type="range" min="0" max="100" value="65"></label>
+    <label>Cohesion <input id="cohesion" type="range" min="0" max="100" value="60"></label>
+    <label>Pressure <input id="press" type="range" min="0" max="200" value="90"></label>
     <label>Blob Size <input id="size" type="range" min="6" max="20" value="12"></label>
     <label>Gravity <input id="gscale" type="range" min="10" max="200" value="80"></label>
-    <span id="debug" class="hint">status: idle</span>
-    <span class="hint">Tip: Arrows = gravity fallback. Touch/drag pushes oil.</span>
+    <button id="reset">Reset</button>
+    <span class="badge">Drained: <span id="drainCount">0</span></span>
+    <span id="debug" class="hint">Ready</span>
   </header>
 
   <div id="stage">
     <canvas id="c"></canvas>
+    <div class="inner-lip"></div>
     <div class="red-sheet"></div>
     <div class="frame"></div>
-    <div class="inner-lip"></div>
   </div>
 
   <footer class="row">
-    <span class="hint">Blob is rendered under the red acrylic sheet; clear frame gives the toy look. If motion doesn’t work on iPhone, ensure HTTPS or localhost and tap “Enable Motion”.</span>
+    <span class="hint">Tilt or arrow keys to guide oil around pegs and into the drain. Volume is preserved via a pressure/density pass.</span>
   </footer>
 </div>
 
@@ -107,329 +62,367 @@
 (() => {
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
-  let W = 0, H = 0;
+  let W=0,H=0,dpr=1;
 
-  // ---- Simulation params (tuned for "oil")
-  let N = 450;                 // particle count
-  let R = 12;                  // visual radius (slider controls)
-  let restDist = 14;           // preferred neighbor spacing
-  let neighborRadius = 28;     // neighbor search radius
-  let gravity = { x: 0, y: 0.8 }; // will be overridden by tilt/keys
-  let gScale = 0.8;            // global gravity scale (from slider)
-  let viscosity = 0.72;        // 0..1 (slider)
-  let cohesionK = 0.065;       // spring toward neighbors (slider)
-  const repulseK = 0.12;       // short-range repulsion to prevent collapse
-  const boundsBounce = 0.35;   // energy kept on wall bounce
+  // --- Tunables
+  let N = 450;             // particles
+  let R = 12;              // visual radius
+  let restDist = 14;       // preferred spacing
+  let neighborRadius = 28; // neighbor search radius
+  let gravity = {x:0,y:0.8};
+  let gScale = 0.8;
+  let viscosity = 0.72;
+  let cohesionK = 0.060;
+  let pressureK = 0.90;       // 0..2
+  const repulseK = 0.12;
+  const boundsBounce = 0.35;
   const maxSpeed = 6.0;
+
+  // Density target
+  const rho0 = 14.0;
+  let dens;
+
+  // Obstacles: circular pegs + 1 drain
+  const pegs = [];
+  const drain = {x:0,y:0,r:18, count:0}; // drain hole radius ~ 18
 
   // Debug UI
   const debugEl = document.getElementById('debug');
-  function setDebug(msg){ debugEl.textContent = msg; }
+  const setDebug = (t)=> debugEl.textContent = t;
+  const drainEl = document.getElementById('drainCount');
 
-  // Particles
-  const P = [];
-  function rand(a,b){ return a + Math.random()*(b-a); }
-
-  function resize() {
-    const dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
-    const rect = canvas.getBoundingClientRect();
-    W = rect.width; H = rect.height;
+  function resize(){
+    dpr = Math.max(1, Math.min(2, window.devicePixelRatio||1));
+    const r = canvas.getBoundingClientRect(); W=r.width; H=r.height;
     canvas.width = Math.floor(W*dpr); canvas.height = Math.floor(H*dpr);
     ctx.setTransform(dpr,0,0,dpr,0,0);
+    layoutObstacles();
   }
-  window.addEventListener('resize', resize, { passive:true });
-  resize();
+  window.addEventListener('resize', resize, {passive:true});
 
-  function resetParticles() {
-    P.length = 0;
-    const blobs = 3;
-    for (let b=0; b<blobs; b++) {
-      const cx = W*0.5 + (b-1)*40;
-      const cy = H*0.25 + (b-1)*5;
-      for (let i=0; i<N/blobs; i++) {
-        let angle = Math.random()*Math.PI*2;
-        let rad = Math.sqrt(Math.random()) * 40;
-        P.push({
-          x: cx + Math.cos(angle)*rad,
-          y: cy + Math.sin(angle)*rad,
-          vx: rand(-0.5,0.5),
-          vy: rand(-0.5,0.5)
-        });
+  function layoutObstacles(){
+    pegs.length = 0;
+    const inset = 20; // same as canvas inset
+    const left = inset, top = inset, right = W - inset, bottom = H - inset;
+
+    // Simple maze-ish pegged field
+    const cols = 6, rows = 7;
+    const gx = (right - left - 60) / (cols-1);
+    const gy = (bottom - top - 160) / (rows-1);
+    for (let r=0; r<rows; r++){
+      for (let c=0; c<cols; c++){
+        // Stagger rows slightly
+        const sx = left + 40 + c*gx + ((r%2)? gx*0.4 : 0);
+        const sy = top + 80 + r*gy;
+        pegs.push({x:sx, y:sy, r:12});
       }
     }
+
+    // A couple of “walls” made of dense pegs (tighter spacing)
+    for (let i=0;i<8;i++){
+      pegs.push({x:left+120+i*18, y:top+40, r:10});
+      pegs.push({x:left+120+i*18, y:bottom-120, r:10});
+    }
+
+    // Drain at bottom-right
+    drain.x = right - 60;
+    drain.y = bottom - 48;
+    drain.r = 18;
   }
-  resetParticles();
 
-  // Simple uniform grid for neighbor lookup
-  let cellSize = neighborRadius;
-  const grid = new Map();
+  // Particles
+  let P = [];
+  function rand(a,b){ return a + Math.random()*(b-a); }
+  function resetParticles(){
+    P = new Array(N);
+    dens = new Float32Array(N);
+    // Start near top-left
+    for (let i=0;i<N;i++){
+      P[i] = { x: W*0.32 + rand(-40,40), y: H*0.22 + rand(-30,30), vx: rand(-0.5,0.5), vy: rand(-0.5,0.5), alive:true };
+    }
+    drain.count = 0; drainEl.textContent = '0';
+  }
+
+  resize(); resetParticles();
+
+  // Uniform grid
+  let cellSize = neighborRadius, grid = new Map();
   function cellKey(ix,iy){ return (ix<<16)+iy; }
-
-  function buildGrid() {
-    grid.clear();
-    cellSize = neighborRadius;
-    for (let i=0;i<P.length;i++){
-      const p = P[i];
-      const ix = Math.floor(p.x / cellSize);
-      const iy = Math.floor(p.y / cellSize);
-      const k = cellKey(ix,iy);
-      if(!grid.has(k)) grid.set(k, []);
+  function buildGrid(){
+    grid.clear(); cellSize = neighborRadius;
+    for (let i=0;i<N;i++){
+      if (!P[i].alive) continue;
+      const p=P[i], ix=Math.floor(p.x/cellSize), iy=Math.floor(p.y/cellSize);
+      const k=cellKey(ix,iy); if(!grid.has(k)) grid.set(k,[]);
       grid.get(k).push(i);
     }
   }
-  function neighbors(i){
-    const p = P[i];
-    const ix = Math.floor(p.x / cellSize);
-    const iy = Math.floor(p.y / cellSize);
-    const out = [];
+  function forNeighbors(i, fn){
+    const p=P[i];
+    const ix=Math.floor(p.x/cellSize), iy=Math.floor(p.y/cellSize);
     for (let dx=-1; dx<=1; dx++){
       for (let dy=-1; dy<=1; dy++){
-        const arr = grid.get(cellKey(ix+dx, iy+dy));
-        if(!arr) continue;
-        for (let j of arr){
+        const arr = grid.get(cellKey(ix+dx, iy+dy)); if(!arr) continue;
+        for (const j of arr){
           if (j===i) continue;
-          const q = P[j];
-          const dxp = q.x - p.x, dyp = q.y - p.y;
-          const d2 = dxp*dxp + dyp*dyp;
-          if (d2 < neighborRadius*neighborRadius) out.push([j, dxp, dyp, Math.sqrt(d2)]);
+          const q=P[j];
+          const dxp=q.x-p.x, dyp=q.y-p.y;
+          const d2=dxp*dxp + dyp*dyp;
+          if (d2 < neighborRadius*neighborRadius) fn(j, dxp, dyp, Math.sqrt(d2));
         }
       }
     }
-    return out;
   }
 
-  // Touch/mouse poke
-  let dragging = false, dragX=0, dragY=0, lastDX=0, lastDY=0;
-  function pointerPos(e){
-    if (e.touches && e.touches[0]) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
-    return { x: e.clientX, y: e.clientY };
-  }
-  canvas.addEventListener('mousedown', e => { dragging=true; const p=pointerPos(e); dragX=p.x; dragY=p.y; });
-  canvas.addEventListener('mousemove', e => {
-    if (!dragging) return;
-    const p=pointerPos(e);
-    lastDX = p.x - dragX; lastDY = p.y - dragY;
-    dragX=p.x; dragY=p.y;
-  });
+  // Input
+  let dragging=false, dragX=0, dragY=0, lastDX=0, lastDY=0;
+  function pointerPos(e){ return e.touches && e.touches[0] ? {x:e.touches[0].clientX, y:e.touches[0].clientY} : {x:e.clientX, y:e.clientY}; }
+  canvas.addEventListener('mousedown', e=>{ dragging=true; const p=pointerPos(e); dragX=p.x; dragY=p.y; });
+  canvas.addEventListener('mousemove', e=>{ if(!dragging) return; const p=pointerPos(e); lastDX=p.x-dragX; lastDY=p.y-dragY; dragX=p.x; dragY=p.y; });
   canvas.addEventListener('mouseup', ()=> dragging=false);
   canvas.addEventListener('mouseleave', ()=> dragging=false);
-  canvas.addEventListener('touchstart', e => { dragging=true; const p=pointerPos(e); dragX=p.x; dragY=p.y; e.preventDefault(); }, {passive:false});
-  canvas.addEventListener('touchmove', e => {
-    if (!dragging) return;
-    const p=pointerPos(e);
-    lastDX = p.x - dragX; lastDY = p.y - dragY;
-    dragX=p.x; dragY=p.y;
-    e.preventDefault();
-  }, {passive:false});
+  canvas.addEventListener('touchstart', e=>{ dragging=true; const p=pointerPos(e); dragX=p.x; dragY=p.y; e.preventDefault(); }, {passive:false});
+  canvas.addEventListener('touchmove', e=>{ if(!dragging) return; const p=pointerPos(e); lastDX=p.x-dragX; lastDY=p.y-dragY; dragX=p.x; dragY=p.y; e.preventDefault(); }, {passive:false});
   canvas.addEventListener('touchend', ()=> dragging=false);
 
-  // Tilt/keyboard controls
-  const enableTiltBtn = document.getElementById('enableTilt');
-  const nudgeBtn = document.getElementById('nudge');
-  const viscEl = document.getElementById('visc');
-  const cohEl  = document.getElementById('cohesion');
-  const sizeEl = document.getElementById('size');
-  const gscaleEl = document.getElementById('gscale');
+  const enableTiltBtn=document.getElementById('enableTilt');
+  const nudgeBtn=document.getElementById('nudge');
+  const viscEl=document.getElementById('visc');
+  const cohEl=document.getElementById('cohesion');
+  const pressEl=document.getElementById('press');
+  const sizeEl=document.getElementById('size');
+  const gscaleEl=document.getElementById('gscale');
+  const resetBtn=document.getElementById('reset');
 
-  viscEl.addEventListener('input', ()=> viscosity = (+viscEl.value)/100);
-  cohEl.addEventListener('input', ()=> cohesionK = (+cohEl.value)/1000);
-  sizeEl.addEventListener('input', ()=> R = +sizeEl.value);
-  gscaleEl.addEventListener('input', ()=> gScale = (+gscaleEl.value)/100);
+  viscEl.addEventListener('input', ()=> viscosity=(+viscEl.value)/100);
+  cohEl.addEventListener('input',  ()=> cohesionK=(+cohEl.value)/1000);
+  pressEl.addEventListener('input',()=> pressureK=(+pressEl.value)/100);
+  sizeEl.addEventListener('input', ()=> R=+sizeEl.value);
+  gscaleEl.addEventListener('input',()=> gScale=(+gscaleEl.value)/100);
+  nudgeBtn.addEventListener('click', ()=> { for(const p of P){ if(!p.alive) continue; p.vy -= 0.8; p.vx += (Math.random()-0.5)*0.6; } });
+  resetBtn.addEventListener('click', ()=> { resetParticles(); });
 
-  nudgeBtn.addEventListener('click', () => {
-    for (const p of P){ p.vy -= 0.8; p.vx += (Math.random()-0.5)*0.6; }
-  });
-
-  // Keyboard fallback: arrows tilt gravity
-  window.addEventListener('keydown', (e)=>{
+  // Keyboard gravity
+  window.addEventListener('keydown', e=>{
     const step=0.2;
-    if (e.key==='ArrowLeft')  gravity.x -= step;
+    if (e.key==='ArrowLeft') gravity.x -= step;
     if (e.key==='ArrowRight') gravity.x += step;
-    if (e.key==='ArrowUp')    gravity.y -= step;
-    if (e.key==='ArrowDown')  gravity.y += step;
+    if (e.key==='ArrowUp') gravity.y -= step;
+    if (e.key==='ArrowDown') gravity.y += step;
     setDebug(`gravity: (${gravity.x.toFixed(2)}, ${gravity.y.toFixed(2)}) [keys]`);
   });
 
-  // Helpers for sensor support
-  function isSecureOrigin(){
-    return location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
-  }
-
-  let sensorActive = false;
-
-  async function tryEnableMotion(){
-    // iOS requires user gesture + secure origin
-    if (!isSecureOrigin()){
-      setDebug('motion blocked: use HTTPS or localhost');
-    }
-    try {
-      // Request permission if needed (iOS 13+ variants)
-      const needsPerm1 = (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function');
-      const needsPerm2 = (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function');
-      if (needsPerm1){
-        try { await DeviceMotionEvent.requestPermission(); } catch(e){}
-      }
-      if (needsPerm2){
-        try { await DeviceOrientationEvent.requestPermission(); } catch(e){}
-      }
-
-      // Use both orientation and motion; whichever fires updates gravity
-      let gotAny = false;
-
-      function orientHandler(e){
-        // gamma: left/right tilt, beta: front/back.
-        const gx = (e.gamma || 0) / 45;
-        const gy = (e.beta  || 0) / 45;
-        gravity.x = gx * gScale;
-        gravity.y = gy * gScale;
-        gotAny = true;
+  // Motion
+  function isSecure(){ return location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'; }
+  async function enableMotion(){
+    if (!isSecure()) setDebug('Tip: use HTTPS/localhost for iPhone motion');
+    try{
+      if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) { try{ await DeviceMotionEvent.requestPermission(); }catch{} }
+      if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) { try{ await DeviceOrientationEvent.requestPermission(); }catch{} }
+      let got=false;
+      window.addEventListener('deviceorientation', e=>{
+        const gx=(e.gamma||0)/45, gy=(e.beta||0)/45; gravity.x=gx*gScale; gravity.y=gy*gScale; got=true;
         setDebug(`gravity: (${gravity.x.toFixed(2)}, ${gravity.y.toFixed(2)}) [orientation]`);
-      }
-      function motionHandler(e){
-        // Use accelerationIncludingGravity as a fallback source
-        if (e.accelerationIncludingGravity){
-          const ax = e.accelerationIncludingGravity.x || 0;
-          const ay = e.accelerationIncludingGravity.y || 0;
-          // Map device axes to our gravity (tuned lightly)
-          gravity.x = (ax / 9.81) * gScale;
-          gravity.y = (ay / 9.81) * gScale;
-          gotAny = true;
-          setDebug(`gravity: (${gravity.x.toFixed(2)}, ${gravity.y.toFixed(2)}) [motion]`);
-        }
-      }
+      }, true);
+      window.addEventListener('devicemotion', e=>{
+        const a=e.accelerationIncludingGravity||{}; const ax=(a.x||0)/9.81, ay=(a.y||0)/9.81; gravity.x=ax*gScale; gravity.y=ay*gScale; got=true;
+        setDebug(`gravity: (${gravity.x.toFixed(2)}, ${gravity.y.toFixed(2)}) [motion]`);
+      }, true);
+      setTimeout(()=>{ if(!got) setDebug('No sensor events; use arrows.'); }, 1200);
+      enableTiltBtn.textContent='Motion Enabled'; enableTiltBtn.disabled=true;
+    }catch{ setDebug('Motion permission denied'); }
+  }
+  enableTiltBtn.addEventListener('click', enableMotion);
 
-      window.addEventListener('deviceorientation', orientHandler, true);
-      window.addEventListener('devicemotion', motionHandler, true);
-
-      // If nothing fires in 1.2s, tell the user
-      setTimeout(()=>{
-        if (!gotAny){
-          setDebug('no sensor events; use arrow keys or ensure permissions/HTTPS');
-        }
-      }, 1200);
-
-      sensorActive = true;
-      enableTiltBtn.textContent = 'Motion Enabled';
-      enableTiltBtn.disabled = true;
-    } catch (err){
-      setDebug('motion permission denied; use arrows or HTTPS');
+  // --- Density pass (volume preservation)
+  function computeDensities(){
+    const h=neighborRadius;
+    for (let i=0;i<N;i++){ dens[i]=0; }
+    for (let i=0;i<N;i++){
+      if (!P[i].alive) { dens[i]=0; continue; }
+      let rho=1.0; // include self
+      forNeighbors(i,(j,dx,dy,d)=>{
+        const q=d/h; if(q<1){ const w=(1-q)*(1-q); rho+=w; }
+      });
+      dens[i]=rho;
     }
   }
 
-  enableTiltBtn.addEventListener('click', tryEnableMotion);
+  // --- Obstacle collision helpers
+  function collidePeg(p, peg){
+    // Push particle out of the peg if inside
+    const dx = p.x - peg.x, dy = p.y - peg.y;
+    const d = Math.hypot(dx,dy);
+    const minR = peg.r + R*0.75; // slight buffer so droplet skirts nicely
+    if (d < minR){
+      const nx = dx/(d||1), ny = dy/(d||1);
+      const push = (minR - d);
+      p.x += nx * push;
+      p.y += ny * push;
+      // damp velocity to reduce jitter
+      const vn = p.vx*nx + p.vy*ny;
+      p.vx -= vn*nx; p.vy -= vn*ny;
+      p.vx *= 0.85; p.vy *= 0.85;
+    }
+  }
 
-  // Simulation step
+  function checkDrain(p){
+    const dx = p.x - drain.x, dy = p.y - drain.y;
+    const d = Math.hypot(dx,dy);
+    if (d < drain.r){
+      // “Collect” the drop: mark dead and increment counter
+      if (p.alive){
+        p.alive = false;
+        drain.count++;
+        drainEl.textContent = String(drain.count);
+      }
+    }
+  }
+
+  // --- Simulation step
   function step(dt){
     buildGrid();
+    computeDensities();
 
-    for (let i=0;i<P.length;i++){
+    const h = neighborRadius;
+
+    for (let i=0;i<N;i++){
       const p = P[i];
+      if (!p.alive) continue;
+
       let ax = gravity.x, ay = gravity.y;
 
-      // Neighbor interactions
-      const nb = neighbors(i);
-      for (let k=0;k<nb.length;k++){
-        const [j, dx, dy, d] = nb[k];
-        if (d < 1e-6) continue;
-        const nx = dx / d, ny = dy / d;
-
-        // Spring toward rest distance (cohesion for "oil")
+      // Cohesion/repulsion
+      forNeighbors(i,(j,dx,dy,d)=>{
+        if (d < 1e-6) return;
+        const nx = dx/d, ny = dy/d;
         const diff = d - restDist;
         ax += nx * (-cohesionK * diff);
         ay += ny * (-cohesionK * diff);
-
-        // Stronger repulsion at very close range (prevents clumping)
         const push = Math.max(0, (restDist*0.75 - d));
         if (push > 0){
-          ax += -nx * repulseK * (push / restDist);
-          ay += -ny * repulseK * (push / restDist);
+          ax += -nx * repulseK * (push/restDist);
+          ay += -ny * repulseK * (push/restDist);
         }
-      }
+      });
 
-      // Touch/drag poke: add velocity “wind” near pointer
+      // Pressure (volume preservation)
+      const rhoi = dens[i];
+      forNeighbors(i,(j,dx,dy,d)=>{
+        if (d < 1e-6) return;
+        const q = d/h; if (q>=1) return;
+        const gradW = (1-q);
+        const nx = dx/d, ny = dy/d;
+        const rhoj = dens[j];
+        const pi = Math.max(0, (rhoi - rho0));
+        const pj = Math.max(0, (rhoj - rho0));
+        const pterm = (pi + pj) * 0.5 * (pressureK * 0.018);
+        ax += -nx * pterm * gradW;
+        ay += -ny * pterm * gradW;
+      });
+
+      // Touch push
       if (dragging){
         const dx = p.x - dragX, dy = p.y - dragY;
-        const d2 = dx*dx + dy*dy;
-        const rad = 90;
-        if (d2 < rad*rad) {
-          const falloff = 1 - (Math.sqrt(d2)/rad);
-          ax += lastDX * 0.25 * falloff;
-          ay += lastDY * 0.25 * falloff;
-        }
+        const d2 = dx*dx + dy*dy; const rad = 90;
+        if (d2 < rad*rad){ const fall=1-(Math.sqrt(d2)/rad); ax += lastDX*0.25*fall; ay += lastDY*0.25*fall; }
       }
 
-      // Integrate velocity (viscous damping)
+      // Integrate with viscosity
       p.vx = (p.vx + ax*dt) * (1 - viscosity*0.35);
       p.vy = (p.vy + ay*dt) * (1 - viscosity*0.35);
 
-      // Clamp max speed
+      // Speed clamp
       const sp = Math.hypot(p.vx,p.vy);
       if (sp > maxSpeed){ p.vx *= maxSpeed/sp; p.vy *= maxSpeed/sp; }
 
-      // Integrate position
-      p.x += p.vx*dt*60;
-      p.y += p.vy*dt*60;
+      // Move
+      p.x += p.vx*dt*60; p.y += p.vy*dt*60;
 
-      // Walls
-      if (p.x < R){ p.x = R; p.vx *= -boundsBounce; }
-      if (p.x > W-R){ p.x = W-R; p.vx *= -boundsBounce; }
-      if (p.y < R){ p.y = R; p.vy *= -boundsBounce; }
-      if (p.y > H-R){ p.y = H-R; p.vy *= -boundsBounce; }
+      // Walls (canvas interior bounds)
+      const L = 20+R, T = 20+R, Rb = W-20-R, Bb = H-20-R;
+      if (p.x < L){ p.x=L; p.vx*=-boundsBounce; }
+      if (p.x > Rb){ p.x=Rb; p.vx*=-boundsBounce; }
+      if (p.y < T){ p.y=T; p.vy*=-boundsBounce; }
+      if (p.y > Bb){ p.y=Bb; p.vy*=-boundsBounce; }
+
+      // Peg collisions
+      for (let k=0;k<pegs.length;k++){ collidePeg(p, pegs[k]); }
+      // Drain
+      checkDrain(p);
     }
   }
 
-  // Rendering: soft discs + blur → single blob look (no outlines)
+  // --- Render
   function draw(){
     ctx.clearRect(0,0,W,H);
 
+    // Draw pegs (under acrylic but over canvas background)
+    // Subtle look: faint gray circles to suggest posts behind red acrylic
     ctx.save();
-    ctx.globalAlpha = 0.8;
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.filter = 'blur(2px)'; // slight blur to fuse droplets
-    const gradR = R;
-    for (let i=0;i<P.length;i++){
-      const p = P[i];
-      const g = ctx.createRadialGradient(p.x,p.y,gradR*0.2, p.x,p.y,gradR);
-      // Deep blue oil (no black outline); red acrylic above will tint it
-      g.addColorStop(0, 'rgba(40,140,255,0.45)');
-      g.addColorStop(1, 'rgba(40,140,255,0.00)');
+    ctx.globalAlpha = 0.55;
+    for (const peg of pegs){
+      const g = ctx.createRadialGradient(peg.x, peg.y, 2, peg.x, peg.y, peg.r);
+      g.addColorStop(0, 'rgba(200,210,230,0.25)');
+      g.addColorStop(1, 'rgba(120,130,150,0.05)');
       ctx.fillStyle = g;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, gradR, 0, Math.PI*2);
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(peg.x, peg.y, peg.r, 0, Math.PI*2); ctx.fill();
+
+      // inner ring
+      ctx.beginPath(); ctx.arc(peg.x, peg.y, peg.r-2, 0, Math.PI*2);
+      ctx.strokeStyle='rgba(255,255,255,0.08)'; ctx.lineWidth=2; ctx.stroke();
     }
     ctx.restore();
 
-    // Soft specular highlights for gloss
+    // Drain (a dark hole)
     ctx.save();
-    ctx.globalAlpha = 0.25;
-    ctx.filter = 'blur(1px)';
-    for (let i=0;i<P.length;i+=4){
-      const p = P[i];
+    const dg = ctx.createRadialGradient(drain.x, drain.y, 2, drain.x, drain.y, drain.r);
+    dg.addColorStop(0,'rgba(0,0,0,0.85)'); dg.addColorStop(1,'rgba(0,0,0,0.15)');
+    ctx.fillStyle = dg;
+    ctx.beginPath(); ctx.arc(drain.x, drain.y, drain.r, 0, Math.PI*2); ctx.fill();
+    // rim
+    ctx.beginPath(); ctx.arc(drain.x, drain.y, drain.r+2, 0, Math.PI*2);
+    ctx.strokeStyle='rgba(255,255,255,0.10)'; ctx.lineWidth=2; ctx.stroke();
+    ctx.restore();
+
+    // Render droplets (normal compositing)
+    ctx.save();
+    ctx.globalAlpha = 0.92;
+    ctx.filter = 'blur(1.6px)';
+    for (let i=0;i<N;i++){
+      const p = P[i]; if(!p.alive) continue;
+      const g = ctx.createRadialGradient(p.x,p.y,R*0.25,p.x,p.y,R);
+      g.addColorStop(0,'rgba(40,140,255,0.50)');
+      g.addColorStop(1,'rgba(40,140,255,0.00)');
+      ctx.fillStyle=g;
+      ctx.beginPath(); ctx.arc(p.x,p.y,R,0,Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+
+    // Highlights
+    ctx.save(); ctx.globalAlpha = 0.22; ctx.filter='blur(1px)';
+    for (let i=0;i<N;i+=4){
+      const p = P[i]; if(!p.alive) continue;
       ctx.beginPath();
       ctx.ellipse(p.x - R*0.25, p.y - R*0.35, R*0.35, R*0.22, -0.6, 0, Math.PI*2);
-      ctx.fillStyle = 'rgba(255,255,255,0.20)';
-      ctx.fill();
+      ctx.fillStyle='rgba(255,255,255,0.22)'; ctx.fill();
     }
     ctx.restore();
   }
 
-  // Main loop
-  let last = performance.now();
+  // Loop
+  let last=performance.now();
   function loop(now){
-    const dt = Math.min(0.035, (now - last)/1000); // clamp big frames
-    last = now;
-    step(dt);
-    draw();
-    requestAnimationFrame(loop);
+    const dt=Math.min(0.035,(now-last)/1000); last=now;
+    step(dt); draw(); requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
 
-  // Initial debug hint
-  if (!isSecureOrigin()){
-    setDebug('Tip: For iPhone motion, serve via HTTPS/localhost and tap “Enable Motion”.');
+  // UI status
+  if (!(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1')){
+    setDebug('Tip: For iPhone tilt, serve via HTTPS/localhost and tap “Enable Motion”.');
   } else {
-    setDebug('status: ready (tap “Enable Motion” or use arrow keys)');
+    setDebug('Tilt to move. Arrows = fallback.');
   }
 })();
 </script>
