@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Fluid Fantasy — Diagnostics</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1220;color:#cfe7ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  header{position:relative;z-index:1000;display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px;background:#0e162a}
+  button{appearance:none;border:none;border-radius:8px;padding:8px 12px;background:#243557;color:#cfe7ff;font-weight:700;touch-action:manipulation;cursor:pointer}
+  #stage{position:relative;z-index:1;height:calc(100vh - 64px);display:grid;place-items:center}
+  #card{background:#132245;border-radius:14px;padding:18px 16px;max-width:520px;width:calc(100vw - 40px)}
+  code{background:#0d1933;padding:2px 6px;border-radius:6px}
+  .row{margin:.5rem 0}
+</style>
+<header>
+  <button id="btnAlert">Test Click</button>
+  <button id="btnMotion">Enable Motion</button>
+  <span id="stat" style="margin-left:6px;opacity:.9">Ready</span>
+</header>
+<div id="stage">
+  <div id="card">
+    <div class="row">Secure origin (https): <code id="secure">no</code></div>
+    <div class="row">Motion events flowing: <code id="motion">no</code></div>
+    <div class="row">Gravity (x,y): <code id="g">0, 1</code></div>
+    <div class="row">Tip: open this URL over <b>HTTPS</b>, then tap <b>Enable Motion</b> and allow.</div>
+  </div>
+</div>
+<script>
+  const secure = (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+  secure && (document.getElementById('secure').textContent = 'yes');
+
+  // 1) Button click test
+  document.getElementById('btnAlert').addEventListener('click', () => {
+    document.getElementById('stat').textContent = 'Click OK ✅';
+  });
+
+  // 2) Motion test
+  let motionFlow = false, gravity={x:0,y:1};
+  function updateHUD(){
+    document.getElementById('motion').textContent = motionFlow ? 'yes' : 'no';
+    document.getElementById('g').textContent = `${gravity.x.toFixed(2)}, ${gravity.y.toFixed(2)}`;
+  }
+  updateHUD();
+
+  async function enableMotion(){
+    try{
+      if (window.DeviceMotionEvent && DeviceMotionEvent.requestPermission) {
+        try { await DeviceMotionEvent.requestPermission(); } catch {}
+      }
+      if (window.DeviceOrientationEvent && DeviceOrientationEvent.requestPermission) {
+        try { await DeviceOrientationEvent.requestPermission(); } catch {}
+      }
+    }catch{}
+    window.addEventListener('deviceorientation', e => {
+      gravity.x = (e.gamma||0)/45; gravity.y = (e.beta||0)/45; motionFlow = true; updateHUD();
+    }, {passive:true});
+    window.addEventListener('devicemotion', e => {
+      const a = e.accelerationIncludingGravity || {};
+      gravity.x = (a.x||0)/9.81; gravity.y = (a.y||0)/9.81; motionFlow = true; updateHUD();
+    }, {passive:true});
+    const b = document.getElementById('btnMotion'); b.textContent = 'Motion Enabled'; b.disabled = true;
+    document.getElementById('stat').textContent = 'Waiting for sensor events…';
+    setTimeout(()=>{ if(!motionFlow) document.getElementById('stat').textContent = 'No motion events. Check Safari > Settings > Motion & Orientation Access.'; }, 1200);
+  }
+  document.getElementById('btnMotion').addEventListener('click', enableMotion);
+</script>
+</html><!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Oil Toy — Thin Film Demo</title>
+<style>
+  html,body{margin:0;height:100%;background:#0b1220;color:#cfe7ff;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;overflow:hidden}
+  header,footer{position:relative;z-index:1000;padding:10px 14px;background:#0e162a;border-bottom:1px solid #1e2b4a}
+  footer{border-top:1px solid #1e2b4a;border-bottom:none}
+  #stage{position:relative;z-index:1;width:100%;height:100%}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  button,input[type=range]{appearance:none;border:none;border-radius:8px;padding:8px 12px;background:#243557;color:#cfe7ff;font-weight:600;touch-action:manipulation;cursor:pointer}
+  input[type=range]{width:140px}
+  label{display:flex;align-items:center;gap:6px;font-size:12px;opacity:.95}
+  .hint{opacity:.85;font-size:12px}
+  .backplate{position:absolute;inset:20px;border-radius:14px;z-index:0;background:#c42529;box-shadow:0 0 0 1px rgba(0,0,0,.25) inset;pointer-events:none}
+  #c{position:absolute;inset:20px;border-radius:14px;width:calc(100% - 40px);height:calc(100% - 40px);display:block;z-index:1;pointer-events:none}
+  .redsheet{position:absolute;inset:20px;border-radius:14px;pointer-events:none;z-index:3;background:rgba(215,30,30,.28);box-shadow:0 0 0 1px rgba(120,0,0,.35) inset,0 12px 20px rgba(255,40,40,.06) inset}
+  .frame{position:absolute;inset:0;pointer-events:none;z-index:4;border-radius:22px;border:10px solid rgba(255,255,255,.14);box-shadow:0 0 0 2px rgba(255,255,255,.10) inset,0 0 0 1px rgba(0,0,0,.55),0 18px 40px rgba(0,0,0,.45)}
+  #hud{font:12px/1.2 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;background:#15213a;padding:6px 8px;border-radius:8px;opacity:.95}
+</style>
+</head>
+<body>
+<header class="row">
+  <strong>Oil Toy</strong>
+  <button id="enableTilt">Enable Motion</button>
+  <button id="lockOrientation">Lock Orientation</button>
+  <label>Viscosity <input id="visc" type="range" min="0" max="100" value="75"></label>
+  <label>Surface Tension <input id="tension" type="range" min="0" max="100" value="70"></label>
+  <label>Drip Tilt° <input id="tiltdeg" type="range" min="4" max="30" value="14"></label>
+  <span id="hud">Ready</span>
+</header>
+<div id="stage">
+  <div class="backplate"></div>
+  <canvas id="c"></canvas>
+  <div class="redsheet"></div>
+  <div class="frame"></div>
+</div>
+<footer class="row"><span class="hint">Use HTTPS, tap Enable Motion. UI is fixed; sliders live-update.</span></footer>
+<script>
+(()=>{
+  const canvas=document.getElementById('c'), ctx=canvas.getContext('2d');
+  let W=0,H=0,dpr=1;
+  function resize(){dpr=Math.max(1,Math.min(2,devicePixelRatio||1));const r=canvas.getBoundingClientRect();W=r.width;H=r.height;canvas.width=Math.floor(W*dpr);canvas.height=Math.floor(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0);layout();}
+  addEventListener('resize',resize,{passive:true}); resize();
+  const hud=document.getElementById('hud');
+  const viscEl=document.getElementById('visc'),tensEl=document.getElementById('tension'),tiltEl=document.getElementById('tiltdeg');
+  let VISCOSITY=+viscEl.value/100,SURF_TENSION=+tensEl.value/100,DRIP_TILT_ON=+tiltEl.value,DRIP_TILT_OFF=Math.max(4,Math.round(DRIP_TILT_ON*0.65));
+  viscEl.oninput=()=>VISCOSITY=+viscEl.value/100; tensEl.oninput=()=>SURF_TENSION=+tensEl.value/100; tiltEl.oninput=()=>{DRIP_TILT_ON=+tiltEl.value;DRIP_TILT_OFF=Math.max(4,Math.round(DRIP_TILT_ON*0.65));};
+  document.getElementById('lockOrientation').onclick=async()=>{try{const st=document.getElementById('stage');if(!document.fullscreenElement&&st.requestFullscreen)await st.requestFullscreen();if(screen.orientation&&screen.orientation.lock){const t=(screen.orientation.type||'portrait-primary').includes('landscape')?'landscape-primary':'portrait-primary';await screen.orientation.lock(t);hud.textContent='Orientation locked';}else hud.textContent='Use device rotation lock if needed.';}catch{hud.textContent='Lock blocked by iOS; use device rotation lock.';}};
+  let gravity={x:0,y:1},seenMotion=false; const secure=(location.protocol==='https:'||location.hostname==='localhost'||location.hostname==='127.0.0.1');
+  function gUnit(){const m=Math.hypot(gravity.x,gravity.y)||1;return{gx:gravity.x/m,gy:gravity.y/m};}
+  function tiltDegX(){const {gx}=gUnit();return Math.asin(Math.min(1,Math.max(-1,Math.abs(gx))))*180/Math.PI;}
+  async function enableMotion(){if(!secure)hud.textContent='Open over HTTPS for sensors.';try{if(window.DeviceMotionEvent&&DeviceMotionEvent.requestPermission)await DeviceMotionEvent.requestPermission();if(window.DeviceOrientationEvent&&DeviceOrientationEvent.requestPermission)await DeviceOrientationEvent.requestPermission();}catch{} addEventListener('deviceorientation',e=>{gravity.x=(e.gamma||0)/45;gravity.y=(e.beta||0)/45;seenMotion=true;},{passive:true}); addEventListener('devicemotion',e=>{const a=e.accelerationIncludingGravity||{};gravity.x=(a.x||0)/9.81;gravity.y=(a.y||0)/9.81;seenMotion=true;},{passive:true}); const b=document.getElementById('enableTilt');b.textContent='Motion Enabled';b.disabled=true;}
+  document.getElementById('enableTilt').onclick=enableMotion;
+  const OIL='#2a8cff',EDGE='rgba(0,0,0,.95)'; const MASS_TOTAL=900; let massTop=MASS_TOTAL,massDrops=0;
+  let meniscusPinned=true,dripPhase=0,drops=[],dropAcc=0; const GRAVITY_SCALE=0.12,PLATE_DRAG=6.0;
+  const rects=[],pegs=[]; let topShelf,bottomShelf;
+  function addRect(px,py,pw,ph){rects.push({x:20+(W-40)*px,y:20+(H-40)*py,w:(W-40)*pw,h:(H-40)*ph});}
+  function addPeg(px,py,r){pegs.push({x:20+(W-40)*px,y:20+(H-40)*py,r});}
+  function layout(){rects.length=0;pegs.length=0;addRect(0.10,0.12,0.80,0.016);topShelf=rects[rects.length-1];addRect(0.30,0.45,0.18,0.016);addRect(0.15,0.86,0.70,0.022);bottomShelf=rects[rects.length-1];addPeg(0.62,0.30,12);addPeg(0.70,0.54,10);addPeg(0.48,0.60,8);}
+  const areaFromMass=m=>m; function radiiFromArea(A,e){const rx=Math.sqrt(A/(Math.PI*e));return{rx,ry:rx*e};}
+  function drawTear(d){const {gx,gy}=gUnit(),px=-gy,py=gx,tail=Math.min(d.ry*.9,12);const nx=d.x+gx*(d.ry+tail),ny=d.y+gy*(d.ry+tail),bx=d.x-gx*d.ry,by=d.y-gy*d.ry;ctx.beginPath();ctx.moveTo(bx+px*d.rx,by+py*d.rx);ctx.quadraticCurveTo(d.x+px*d.rx,d.y+py*d.rx,nx,ny);ctx.quadraticCurveTo(d.x-px*d.rx,d.y-py*d.rx,bx-px*d.rx,by-py*d.rx);ctx.closePath();ctx.fillStyle=OIL;ctx.strokeStyle=EDGE;ctx.lineWidth=1.6;ctx.fill();ctx.stroke();}
+  function emitDrop(dt){if(massTop<=0)return;const td=tiltDegX();if(meniscusPinned&&td>=DRIP_TILT_ON)meniscusPinned=false;else if(!meniscusPinned&&td<=DRIP_TILT_OFF)meniscusPinned=true;dripPhase=meniscusPinned?Math.max(0,dripPhase-dt*2):Math.min(1,dripPhase+dt*2);if(meniscusPinned||dripPhase<=0)return;const L=topShelf.x+12,R=topShelf.x+topShelf.w-12,right=(gUnit().gx>=0);const x=right?(R-4):(L+4),y=topShelf.y+topShelf.h/2;const {gx,gy}=gUnit();const down=Math.max(0,gy+Math.abs(gx)*.15);dropAcc+=(.25+.75*down)*dripPhase*(1-SURF_TENSION*.5)*dt*120;if(dropAcc>=1&&massTop>0){dropAcc-=1;const m=Math.min(massTop,6+10*SURF_TENSION);massTop-=m;massDrops+=m;const A=areaFromMass(m);let {rx,ry}=radiiFromArea(A,Math.max(1.2,1.35+.45*Math.abs(gx)+.35*Math.abs(gy)));const RY=10;if(ry>RY){ry=RY;rx=A/(Math.PI*ry);}drops.push({x,y,vx:gx*.25,vy:gy*.25,rx,ry,m});}}
+  function collideRect(d,rc){const L=rc.x,R=L+rc.w,T=rc.y,B=T+rc.h,r=Math.max(d.rx,d.ry)*.85;if(d.x>L-r&&d.x<R+r&&d.y>T-r&&d.y<B+r){const dl=Math.abs(d.x-L),dr=Math.abs(R-d.x),dt=Math.abs(d.y-T),db=Math.abs(B-d.y),m=Math.min(dl,dr,dt,db);if(m===dt){d.y=T-r;d.ry*=.88;d.rx*=1.06;const ab=Math.min(d.m,d.m*(.20+.60*SURF_TENSION)*.3);d.m-=ab;massDrops-=ab;massTop+=ab;if(d.m<=.6)return'rm';}else if(m===db){d.y=B+r;}else if(m===dl){d.x=L-r;}else{d.x=R+r;}const {gx,gy}=gUnit();const dot=d.vx*gx+d.vy*gy;d.vx=gx*dot;d.vy=gy*dot;}}
+  function collidePeg(d,pg){const dx=d.x-pg.x,dy=d.y-pg.y,dist=Math.hypot(dx,dy),minR=pg.r+Math.max(d.rx,d.ry)*.85;if(dist<minR){const nx=(dx||.001)/(dist||1),ny=(dy||.001)/(dist||1),push=(minR-dist);d.x+=nx*push;d.y+=ny*push;const {gx,gy}=gUnit();const dot=d.vx*gx+d.vy*gy;d.vx=gx*dot;d.vy=gy*dot;}}
+  function step(dt){emitDrop(dt);const {gx,gy}=gUnit();for(let i=drops.length-1;i>=0;i--){const d=drops[i];d.vx=(d.vx+gx*.12)*Math.exp(-(VISCOSITY*.9+PLATE_DRAG)*dt);d.vy=(d.vy+gy*.12)*Math.exp(-(VISCOSITY*.9+PLATE_DRAG)*dt);const dot=d.vx*gx+d.vy*gy;d.vx=gx*dot;d.vy=gy*dot;d.x+=d.vx*dt*60;d.y+=d.vy*dt*60;const pad=Math.max(d.rx,d.ry)*.85;if(d.x<20+pad)d.x=20+pad;if(d.x>W+20-pad)d.x=W+20-pad;if(d.y<20+pad)d.y=20+pad;if(d.y>H+20-pad)d.y=H+20-pad;for(const rc of rects){if(collideRect(d,rc)==='rm'){drops.splice(i,1);continue;}}for(const pg of pegs){collidePeg(d,pg);}const bottomY=bottomShelf.y-4;if(d.y>bottomY-d.ry*.5){const ab=Math.min(d.m,d.m*(.25+.65*SURF_TENSION)*.5);d.m-=ab;massDrops-=ab;massTop+=ab;if(d.m<=.6){drops.splice(i,1);continue;}}const sp=Math.hypot(d.vx,d.vy),A=areaFromMass(d.m);let {rx,ry}=radiiFromArea(A,Math.max(1.2,1.15+.6*Math.tanh(sp*.7)));const RY=10;if(ry>RY){ry=RY;rx=A/(Math.PI*ry);}d.rx=rx;d.ry=ry;}const total=massTop+massDrops,drift=900-total;if(Math.abs(drift)>1e-6){if(massTop>=massDrops)massTop+=drift;else massDrops+=drift;}}
+  function draw(){ctx.clearRect(0,0,W,H);ctx.save();ctx.globalAlpha=.55;ctx.fillStyle='rgba(190,200,220,.08)';ctx.strokeStyle='rgba(255,255,255,.10)';ctx.lineWidth=2;rects.forEach(rc=>{ctx.fillRect(rc.x,rc.y,rc.w,rc.h);ctx.strokeRect(rc.x+1,rc.y+1,rc.w-2,rc.h-2);});pegs.forEach(pg=>{ctx.beginPath();ctx.arc(pg.x,pg.y,pg.r,0,Math.PI*2);ctx.fill();});ctx.restore();const poolW=bottomShelf.w*.9,poolH=Math.max(18,Math.min(90,massTop/40)),poolX=bottomShelf.x+(bottomShelf.w-poolW)/2,poolY=bottomShelf.y+bottomShelf.h-poolH;ctx.save();ctx.fillStyle='#2a8cff';ctx.strokeStyle='rgba(0,0,0,.95)';ctx.lineWidth=2;roundRect(ctx,poolX,poolY,poolW,poolH,12);ctx.fill();ctx.stroke();ctx.restore();drops.forEach(drawTear);hud.textContent=`Top:${Math.round(massTop)} Drops:${Math.round(massDrops)} Visc:${Math.round(VISCOSITY*100)} Tens:${Math.round(SURF_TENSION*100)} DripTilt:${DRIP_TILT_ON}° secure:${secure?'yes':'no'} motion:${seenMotion?'yes':'no'}`;}
+  function roundRect(ctx,x,y,w,h,r){const rr=Math.min(r,w/2,h/2);ctx.beginPath();ctx.moveTo(x+rr,y);ctx.arcTo(x+w,y,x+w,y+h,rr);ctx.arcTo(x+w,y+h,x,y+h,rr);ctx.arcTo(x,y+h,x,y,rr);ctx.arcTo(x,y,x+w,y,rr);ctx.closePath();}
+  let last=performance.now(); function
