@@ -1,1 +1,317 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Fluid Fantasy – Drip Model (No Bounce)</title>
+<style>
+  :root{ --bg:#0f1a28; --panel:#152338; --text:#e9f0ff; }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
+    font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:520px;margin:18px auto 28px;padding:16px}
+  .bar{display:flex;align-items:center;gap:.8rem;background:var(--panel);
+    padding:12px 14px;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}
+  .title{font-weight:700;font-size:1.15rem;letter-spacing:.2px}
+  .chip{margin-left:auto;padding:6px 10px;border-radius:999px;background:#0b1b2e;color:#a6c4ff;font-size:.85rem}
+  .stage{margin-top:14px;background:linear-gradient(180deg,#0c1624,#0a1420);padding:16px;border-radius:18px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 10px 28px rgba(0,0,0,.35)}
+  canvas{display:block;width:100%;height:auto}
+  .hint{opacity:.85;font-size:.9rem;margin-top:10px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bar">
+      <div class="title">Fluid Fantasy</div>
+      <div class="chip">Drip • no bounce</div>
+    </div>
 
+    <div class="stage">
+      <canvas id="tank" width="360" height="640" aria-label="Fluid tank canvas"></canvas>
+    </div>
+
+    <p class="hint">Drops hang from the rim, grow, detach, and fall. They *stick* to shelves and creep to the nearest gap — no bouncing.</p>
+  </div>
+
+<script>
+(() => {
+  const canvas = document.getElementById('tank');
+  const ctx = canvas.getContext('2d', { alpha:false });
+
+  // ------- HiDPI fit -------
+  function fitHiDPI(){
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  fitHiDPI();
+  window.addEventListener('resize', () => { fitHiDPI(); resetGeom(); });
+
+  // ------- Tank geometry -------
+  const tank = { x:12, y:12, r:22, w:()=>canvas.getBoundingClientRect().width-24, h:()=>canvas.getBoundingClientRect().height-24 };
+  function roundedRectPath(x,y,w,h,r){
+    const p = new Path2D(), rr = Math.min(r,w/2,h/2);
+    p.moveTo(x+rr,y); p.arcTo(x+w,y,x+w,y+h,rr); p.arcTo(x+w,y+h,x,y+h,rr);
+    p.arcTo(x,y+h,x,y,rr); p.arcTo(x,y,x+w,y,rr); p.closePath(); return p;
+  }
+
+  // ------- Shelves -------
+  function shelvesSpec(){
+    const W=tank.w(), H=tank.h();
+    return [
+      { y:H*0.22, gaps:[[W*0.40,W*0.62]] },
+      { y:H*0.36, gaps:[[W*0.15,W*0.35],[W*0.75,W*0.95]] },
+      { y:H*0.50, gaps:[[W*0.55,W*0.82]] },
+      { y:H*0.64, gaps:[[W*0.10,W*0.28],[W*0.45,W*0.60]] },
+      { y:H*0.78, gaps:[[W*0.70,W*0.92]] },
+    ];
+  }
+  let shelves = shelvesSpec();
+  function resetGeom(){ shelves = shelvesSpec(); }
+
+  function drawShelves(){
+    const W=tank.w(), x0=tank.x+14, x1=tank.x+W-14;
+    ctx.save();
+    ctx.lineWidth=6; ctx.lineCap='round';
+    ctx.strokeStyle='rgba(230,238,255,0.92)';
+    ctx.shadowColor='rgba(0,0,0,0.18)'; ctx.shadowBlur=2;
+    shelves.forEach(s=>{
+      let start=x0;
+      s.gaps.forEach(([gx0,gx1])=>{
+        seg(start, tank.y+s.y, tank.x+gx0, tank.y+s.y);
+        start=tank.x+gx1;
+      });
+      seg(start, tank.y+s.y, x1, tank.y+s.y);
+    });
+    ctx.restore();
+    function seg(xa,ya,xb,yb){ if(xb-xa<=8) return; ctx.beginPath(); ctx.moveTo(xa,ya); ctx.lineTo(xb,yb); ctx.stroke(); }
+  }
+
+  // ------- Top oil pool (static visual) -------
+  function drawTopOilPool(){
+    const W=tank.w(), H=tank.h();
+    const x=tank.x+10, y=tank.y+10, w=W-20, h=Math.max(70,H*0.12), wave=Math.min(26,H*0.05);
+    ctx.save();
+    ctx.clip( roundedRectPath(tank.x,tank.y,W,H,tank.r) );
+    ctx.shadowColor='rgba(0,0,0,.28)'; ctx.shadowBlur=10; ctx.shadowOffsetY=2;
+
+    const p = new Path2D();
+    p.moveTo(x,y); p.lineTo(x+w,y); p.lineTo(x+w,y+h-wave);
+    const segments=5, segW=w/segments;
+    for(let i=0;i<segments;i++){
+      const cx = x + w - segW*i - segW/2;
+      const cy = y + h - (i%2 ? wave*0.35 : wave);
+      const nx = x + w - segW*(i+1);
+      p.quadraticCurveTo(cx,cy,nx, y+h - wave*(i%2?1:0.35));
+    }
+    p.lineTo(x, y+h-wave); p.closePath();
+    ctx.fillStyle='#2e80ff'; ctx.fill(p);
+    ctx.lineWidth=2; ctx.strokeStyle='#0b2e66'; ctx.stroke(p);
+    ctx.restore();
+
+    // Return the approximate rim y where drops hang from
+    return { rimY: y+h - wave*0.7, left:x, right:x+w };
+  }
+
+  // ------- Physics (no bounce) -------
+  const G = 1200;              // px/s^2 vertical gravity
+  const SLIDE = 70;            // px/s shelf creeping speed
+  const GROWTH = 10;           // px/s equivalent radius growth while hanging
+  const R_MIN = 3, R_DETACH = 9, R_MAX = 11;
+
+  const drops = [];
+
+  function spawnHanging(anchor){
+    drops.push({
+      state:'hanging',
+      ax: anchor,     // anchor x on rim
+      ay: rim.rimY,   // anchor y on rim
+      r: R_MIN + Math.random()*2,
+      t: 0
+    });
+  }
+
+  function isSolidOnShelf(s, x){
+    // True if x is NOT inside any gap
+    for(const [gx0,gx1] of s.gaps){
+      const g0=tank.x+gx0, g1=tank.x+gx1;
+      if(x>=g0 && x<=g1) return false;
+    }
+    return true;
+  }
+
+  function nearestGapEdge(s, x){
+    // Returns x target just outside the nearest gap (edge), so drop creeps toward it
+    let best = {dist:Infinity, x:null};
+    for(const [gx0,gx1] of s.gaps){
+      const left = tank.x+gx0, right=tank.x+gx1;
+      const dL = Math.abs(x-left), dR = Math.abs(x-right);
+      if(dL<best.dist){ best={dist:dL, x:left-0.1}; }
+      if(dR<best.dist){ best={dist:dR, x:right+0.1}; }
+    }
+    return best.x ?? x; // if no gaps, returns current x (shouldn't happen with our spec)
+  }
+
+  function update(dt){
+    // Ensure at least a few active drops
+    while(drops.length < 5) spawnHanging(randBetween(rim.left+12, rim.right-12));
+
+    for(const d of drops){
+      if(d.state==='hanging'){
+        // Grow; sag visually a bit as it grows
+        d.r = Math.min(R_MAX, d.r + GROWTH*dt);
+        d.ay = rim.rimY + d.r*0.55;
+        if(d.r >= R_DETACH){
+          // detach into falling tear
+          d.state='falling';
+          d.x=d.ax; d.y=d.ay; d.vx = (Math.random()*20-10); d.vy=0;
+        }
+      } else if(d.state==='falling'){
+        d.vy += G*dt;
+        d.x += d.vx*dt;
+        d.y += d.vy*dt;
+
+        // wall containment inside tank
+        const left = tank.x+10+d.r, right = tank.x+tank.w()-10-d.r;
+        if(d.x<left) d.x=left;
+        if(d.x>right) d.x=right;
+
+        // shelf collision: stick (no bounce)
+        for(const s of shelves){
+          const yS = tank.y + s.y;
+          if(d.y + d.r >= yS && d.y + d.r - d.vy*dt < yS){ // crossed this frame
+            if(isSolidOnShelf(s, d.x)){
+              d.state='onshelf';
+              d.y = yS - d.r;
+              d.shelf = s;
+              d.targetX = nearestGapEdge(s, d.x);
+              d.vx = 0; d.vy = 0;
+              break;
+            }
+          }
+        }
+
+        // bottom "pool" — just remove & respawn a new hanging
+        const bottom = tank.y + tank.h() - 14;
+        if(d.y + d.r >= bottom){
+          Object.assign(d, {state:'hanging', ax:randBetween(rim.left+12, rim.right-12), ay:rim.rimY, r:R_MIN});
+        }
+
+      } else if(d.state==='onshelf'){
+        // creep toward nearest gap
+        const dir = Math.sign(d.targetX - d.x);
+        d.x += dir * SLIDE * dt;
+        d.y = tank.y + d.shelf.y - d.r;
+
+        // when we’ve reached/entered the gap, drop again
+        const arrived = (dir===0) || (dir>0 ? d.x>=d.targetX : d.x<=d.targetX);
+        if(arrived || !isSolidOnShelf(d.shelf, d.x)){
+          d.state='falling';
+          d.vy = 0; // fall starts again; still no bounce
+          d.vx = 0;
+        }
+      }
+    }
+  }
+
+  function drawDrops(){
+    for(const d of drops){
+      if(d.state==='hanging'){
+        drawTeardrop(d.ax, rim.rimY, d.r);
+      }else{
+        drawCircle(d.x, d.y, d.r);
+      }
+    }
+  }
+
+  // Visuals
+  function drawTank(){
+    const W=tank.w(), H=tank.h();
+    const path = roundedRectPath(tank.x,tank.y,W,H,tank.r);
+
+    // clear
+    ctx.save();
+    ctx.fillStyle='#0c1624';
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.restore();
+
+    // red tank
+    ctx.save();
+    ctx.fillStyle='#cf2e2e';
+    ctx.fill(path);
+    ctx.clip(path);
+    ctx.strokeStyle='rgba(0,0,0,0.35)'; ctx.lineWidth=8; ctx.stroke(path);
+    const grad=ctx.createLinearGradient(0,tank.y,0,tank.y+H);
+    grad.addColorStop(0,'rgba(255,255,255,0.20)');
+    grad.addColorStop(0.08,'rgba(255,255,255,0.12)');
+    grad.addColorStop(0.92,'rgba(0,0,0,0.08)');
+    grad.addColorStop(1,'rgba(0,0,0,0.18)');
+    ctx.fillStyle=grad; ctx.fill(path);
+    ctx.restore();
+  }
+
+  // Top pool rim position (used for hanging)
+  let rim = drawTopOilPool(); // will be re-drawn every frame, but this gives initial rimY
+
+  function render(){
+    drawTank();             // 1) background
+    drawShelves();          // 2) shelves
+    rim = drawTopOilPool(); // 3) static top pool (refreshes rim position)
+    drawDrops();            // 4) moving drops on top
+  }
+
+  // Shapes
+  function drawCircle(x,y,r){
+    ctx.save();
+    ctx.fillStyle='#2e80ff';
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.lineWidth=1.5; ctx.strokeStyle='#0b2e66'; ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawTeardrop(ax, rimY, r){
+    // Simple teardrop connected to the rim anchor (ax,rimY)
+    const length = r*1.4;
+    const bottomY = rimY + r*0.6 + length;
+    const neck = r*0.55;
+
+    ctx.save();
+    ctx.fillStyle='#2e80ff';
+    ctx.strokeStyle='#0b2e66';
+    ctx.lineWidth=1.5;
+
+    const p = new Path2D();
+    p.moveTo(ax - neck, rimY);
+    // left side curve to the bottom tip
+    p.quadraticCurveTo(ax - r*0.9, rimY + length*0.55, ax, bottomY);
+    // right side curve back to rim
+    p.quadraticCurveTo(ax + r*0.9, rimY + length*0.55, ax + neck, rimY);
+    p.closePath();
+
+    ctx.fill(p); ctx.stroke(p);
+    ctx.restore();
+  }
+
+  // Helpers
+  function randBetween(a,b){ return a + Math.random()*(b-a); }
+
+  // ------- Main loop -------
+  let lastT = performance.now();
+  function frame(now){
+    const dt = Math.min(0.033, (now - lastT)/1000); // clamp dt for stability
+    lastT = now;
+    update(dt);
+    render();
+    requestAnimationFrame(frame);
+  }
+
+  // seed a couple hanging drops
+  spawnHanging(randBetween( tank.x+30, tank.x+tank.w()-30 ));
+  spawnHanging(randBetween( tank.x+30, tank.x+tank.w()-30 ));
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
