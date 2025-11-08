@@ -1,1 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Fluid Fantasy — Drip + Tension/Viscosity + Drain</title>
+<style>
+  :root{ --bg:#0f1a28; --panel:#152338; --text:#e9f0ff; --accent:#5aa2ff; }
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--text);
+    font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{max-width:520px;margin:18px auto 28px;padding:0 16px}
+  .bar{display:flex;align-items:center;gap:.8rem;background:var(--panel);
+    padding:12px 14px;border-radius:12px;box-shadow:0 4px 18px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.06)}
+  .title{font-weight:700;font-size:1.15rem;letter-spacing:.2px}
+  .chip{margin-left:auto;padding:6px 10px;border-radius:999px;background:#0b1b2e;color:#a6c4ff;font-size:.85rem}
+  .controls{margin-top:10px;background:var(--panel);padding:10px 14px;border-radius:12px;
+    display:grid;grid-template-columns:110px 1fr 56px;gap:10px 12px;align-items:center}
+  .lbl{opacity:.9}
+  .val{font-variant-numeric:tabular-nums;text-align:right;opacity:.9}
+  input[type="range"]{width:100%}
+  .stage{margin-top:14px;background:linear-gradient(180deg,#0c1624,#0a1420);padding:16px;border-radius:18px;
+    box-shadow:inset 0 1px 0 rgba(255,255,255,.05),0 10px 28px rgba(0,0,0,.35)}
+  canvas{display:block;width:100%;height:auto}
+  .hint{opacity:.85;font-size:.9rem;margin-top:10px}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="bar">
+      <div class="title">Fluid Fantasy</div>
+      <div class="chip">Drip • Tension/Viscosity • Drain</div>
+    </div>
 
+    <div class="controls">
+      <div class="lbl">Tension</div>
+      <input id="tension" type="range" min="0" max="100" value="55" />
+      <div class="val" id="tensionVal">0.55</div>
+
+      <div class="lbl">Viscosity</div>
+      <input id="visc" type="range" min="0" max="100" value="65" />
+      <div class="val" id="viscVal">0.65</div>
+
+      <div class="lbl">Sim Tilt°</div>
+      <input id="tilt" type="range" min="-30" max="30" value="0" />
+      <div class="val" id="tiltVal">0°</div>
+    </div>
+
+    <div class="stage">
+      <canvas id="tank" width="360" height="640" aria-label="Fluid tank canvas"></canvas>
+    </div>
+
+    <p class="hint">
+      • Drops hang, grow, detach, and fall with **no bounce**.<br>
+      • **Tension** ↑ = holds longer before detaching. **Viscosity** ↑ = slower fall/slide.<br>
+      • The **top pool drains immediately**; volume is conserved into a **bottom pool**.<br>
+      • Use **Sim Tilt°** to slosh left/right. (Device tilt can be added later.)
+    </p>
+  </div>
+
+<script>
+(() => {
+  // ---------- Canvas / HiDPI ----------
+  const canvas = document.getElementById('tank');
+  const ctx = canvas.getContext('2d', { alpha:false });
+  function fitHiDPI(){
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  fitHiDPI(); window.addEventListener('resize', () => { fitHiDPI(); resetGeom(); });
+
+  // ---------- Controls ----------
+  const $tension = document.getElementById('tension');
+  const $visc = document.getElementById('visc');
+  const $tilt = document.getElementById('tilt');
+  const $tensionVal = document.getElementById('tensionVal');
+  const $viscVal = document.getElementById('viscVal');
+  const $tiltVal = document.getElementById('tiltVal');
+
+  function ui() {
+    state.tension = +$tension.value / 100;          // 0–1
+    state.viscosity = +$visc.value / 100;           // 0–1
+    state.tiltDeg = +$tilt.value|0;                 // -30..30
+    $tensionVal.textContent = state.tension.toFixed(2);
+    $viscVal.textContent = state.viscosity.toFixed(2);
+    $tiltVal.textContent = state.tiltDeg + '°';
+    // derived
+    state.drag = lerp(0.4, 3.0, state.viscosity);   // linear drag (bigger = slower)
+    state.detachR = lerp(6, 13, state.tension);     // surface tension: bigger = holds longer
+    state.slideSpeed = lerp(110, 40, state.viscosity); // shelf creeping slower with viscosity
+  }
+  $tension.oninput = $visc.oninput = $tilt.oninput = ui;
+
+  // ---------- Tank / shelves ----------
+  const tank = { x:12, y:12, r:22, w:()=>canvas.getBoundingClientRect().width-24, h:()=>canvas.getBoundingClientRect().height-24 };
+  function roundedRectPath(x,y,w,h,r){
+    const p = new Path2D(), rr = Math.min(r,w/2,h/2);
+    p.moveTo(x+rr,y); p.arcTo(x+w,y,x+w,y+h,rr);
+    p.arcTo(x+w,y+h,x,y+h,rr); p.arcTo(x,y+h,x,y,rr);
+    p.arcTo(x,y,x+w,y,rr); p.closePath(); return p;
+  }
+  function shelvesSpec(){
+    const W=tank.w(), H=tank.h();
+    return [
+      { y:H*0.22, gaps:[[W*0.40,W*0.62]] },
+      { y:H*0.36, gaps:[[W*0.15,W*0.35],[W*0.75,W*0.95]] },
+      { y:H*0.50, gaps:[[W*0.55,W*0.82]] },
+      { y:H*0.64, gaps:[[W*0.10,W*0.28],[W*0.45,W*0.60]] },
+      { y:H*0.78, gaps:[[W*0.70,W*0.92]] },
+    ];
+  }
+  let shelves = shelvesSpec();
+  function resetGeom(){ shelves = shelvesSpec(); computeVolumesFromHeights(); }
+
+  function drawShelves(){
+    const W=tank.w(), x0=tank.x+14, x1=tank.x+W-14;
+    ctx.save();
+    ctx.lineWidth=6; ctx.lineCap='round';
+    ctx.strokeStyle='rgba(230,238,255,0.92)';
+    ctx.shadowColor='rgba(0,0,0,0.18)'; ctx.shadowBlur=2;
+    shelves.forEach(s=>{
+      let start=x0;
+      s.gaps.forEach(([gx0,gx1])=>{
+        seg(start, tank.y+s.y, tank.x+gx0, tank.y+s.y);
+        start=tank.x+gx1;
+      });
+      seg(start, tank.y+s.y, x1, tank.y+s.y);
+    });
+    ctx.restore();
+    function seg(xa,ya,xb,yb){ if(xb-xa<=8) return; ctx.beginPath(); ctx.moveTo(xa,ya); ctx.lineTo(xb,yb); ctx.stroke(); }
+  }
+
+  // ---------- Fluid "pools" (top + bottom) with volume conservation ----------
+  // We approximate volume as width * height (2D); drops subtract from topVolume and add to bottomVolume.
+  const fluid = { topHFrac: 0.12, bottomHFrac: 0.00, topVolume: 0, bottomVolume: 0 };
+  function computeVolumesFromHeights(){
+    const W=tank.w(), H=tank.h();
+    fluid.topVolume = W * (H * fluid.topHFrac);
+    fluid.bottomVolume = W * (H * fluid.bottomHFrac);
+  }
+  computeVolumesFromHeights();
+
+  function drawTopPool(){
+    const W=tank.w(), H=tank.h();
+    const x=tank.x+10, y=tank.y+10, w=W-20;
+    const h = Math.max(0, fluid.topVolume / (W));     // pool height from volume
+    const wave = Math.min(26,H*0.05)*(h>0?1:0);
+
+    ctx.save();
+    ctx.clip( roundedRectPath(tank.x,tank.y,W,H,tank.r) );
+    ctx.shadowColor='rgba(0,0,0,.28)'; ctx.shadowBlur=10; ctx.shadowOffsetY=2;
+
+    const p = new Path2D();
+    p.moveTo(x,y); p.lineTo(x+w,y); p.lineTo(x+w,y+h-wave);
+    const segments=5, segW=w/segments;
+    for(let i=0;i<segments;i++){
+      const cx = x + w - segW*i - segW/2;
+      const cy = y + h - (i%2 ? wave*0.35 : wave);
+      const nx = x + w - segW*(i+1);
+      p.quadraticCurveTo(cx,cy,nx, y+h - wave*(i%2?1:0.35));
+    }
+    p.lineTo(x, y+h-wave); p.closePath();
+    ctx.fillStyle='#2e80ff'; ctx.fill(p);
+    ctx.lineWidth=2; ctx.strokeStyle='#0b2e66'; if(h>2) ctx.stroke(p);
+    ctx.restore();
+
+    return { rimY: y+h - wave*0.7, left:x, right:x+w, hasPool: h>4, xLeft:x, xRight:x+w };
+  }
+
+  function drawBottomPool(){
+    const W=tank.w(), H=tank.h();
+    const x=tank.x+10, y=tank.y+10, w=W-20;
+    const h = Math.max(0, Math.min(H-40, fluid.bottomVolume / (W))); // cap inside tank
+    if(h<=0.5) return;
+
+    ctx.save();
+    ctx.clip( roundedRectPath(tank.x,tank.y,W,H,tank.r) );
+    const baseY = tank.y + H - 10;
+    const p = new Path2D();
+    p.moveTo(x, baseY);
+    p.lineTo(x+w, baseY);
+    p.lineTo(x+w, baseY - h + 14);
+    // gentle wave on top surface
+    const segments=5, segW=w/segments, wave=12;
+    for(let i=0;i<segments;i++){
+      const cx = x + segW*i + segW/2;
+      const cy = baseY - h + (i%2 ? wave*0.35 : wave);
+      const nx = x + segW*(i+1);
+      p.quadraticCurveTo(cx,cy,nx, baseY - h + (i%2?wave:wave*0.35));
+    }
+    p.lineTo(x, baseY - h + 14);
+    p.closePath();
+
+    ctx.fillStyle='#2e80ff'; ctx.fill(p);
+    ctx.lineWidth=2; ctx.strokeStyle='#0b2e66'; ctx.stroke(p);
+    ctx.restore();
+  }
+
+  // ---------- Drips ----------
+  const drops = [];
+  const state = { tension:.55, viscosity:.65, drag:2.3, detachR:10.2, slideSpeed:60, tiltDeg:0 };
+
+  function spawnHanging(ax){
+    drops.push({ state:'hanging', ax, r: randBetween(3,4), vy:0, vx:0 });
+  }
+
+  function isSolidOnShelf(s, x){
+    for(const [gx0,gx1] of s.gaps){
+      const g0=tank.x+gx0, g1=tank.x+gx1;
+      if(x>=g0 && x<=g1) return false;
+    }
+    return true;
+  }
+  function nearestGapEdge(s, x){
+    let best = {dist:Infinity, x:null};
+    for(const [gx0,gx1] of s.gaps){
+      const left = tank.x+gx0, right=tank.x+gx1;
+      const dL = Math.abs(x-left), dR = Math.abs(x-right);
+      if(dL<best.dist) best={dist:dL, x:left-0.1};
+      if(dR<best.dist) best={dist:dR, x:right+0.1};
+    }
+    return best.x ?? x;
+  }
+
+  // gravity vector from tilt
+  function gravity(){
+    const gMag = 1200; // px/s^2
+    const theta = state.tiltDeg * Math.PI/180; // + = tilt right => gx+
+    return { gx: gMag*Math.sin(theta), gy: gMag*Math.cos(theta) };
+  }
+
+  // How much "supply" the top pool can shed per second into hanging drops.
+  function poolOutflowPerSecond(){
+    // higher viscosity => slower outflow; higher tension => slower outflow
+    const base = 3000; // px^2 / s (area per second)
+    const viscFactor = lerp(1.0, 0.45, state.viscosity);
+    const tensionFactor = lerp(1.0, 0.55, state.tension);
+    return base * viscFactor * tensionFactor;
+  }
+
+  function update(dt, rim){
+    ui(); // read sliders each frame
+    const {gx, gy} = gravity();
+
+    // --- Top pool emits/feeds hanging drops immediately (drain) ---
+    // Maintain a target number of hangers based on remaining pool volume.
+    const W=tank.w(); const maxHangers = clamp(Math.round(fluid.topVolume / (W*18)), 2, 10);
+    while(drops.filter(d=>d.state==='hanging').length < maxHangers && fluid.topVolume > 60){
+      spawnHanging(randBetween(rim.left+14, rim.right-14));
+    }
+
+    // Feed area from top pool into hanging drops (grow them).
+    let remainingOutflow = poolOutflowPerSecond() * dt;
+    for(const d of drops){
+      if(remainingOutflow<=0) break;
+      if(d.state!=='hanging') continue;
+      // area change dA = 2πr dr ~ 2r dr (drop area πr^2; ignore π factor since consistent both sides)
+      const growthArea = 2 * d.r * (state.tension<0.2?1.2:1.0) * 8; // modest growth step scaler
+      const take = Math.min(remainingOutflow, growthArea, fluid.topVolume-1);
+      const dr = take / (2*d.r);                 // approximate
+      d.r = Math.min(d.r + dr*0.04, 13);         // soften growth
+      remainingOutflow -= take;
+      fluid.topVolume -= take;
+    }
+
+    // --- Drop state machine ---
+    for(const d of drops){
+      if(d.state==='hanging'){
+        // hangs at rim y; visual sag
+        d.y = rim.rimY + d.r*0.6;
+        d.x = d.ax;
+
+        if(d.r >= state.detachR || fluid.topVolume<=1){
+          d.state='falling';
+          d.vx = 0; d.vy = 0;
+        }
+
+      } else if(d.state==='falling'){
+        // viscous drag: dv/dt += g - drag*v
+        d.vx += (gx - state.drag*d.vx) * dt;
+        d.vy += (gy - state.drag*d.vy) * dt;
+        d.x  += d.vx * dt;
+        d.y  += d.vy * dt;
+
+        // tank walls
+        const left = tank.x+10+d.r, right = tank.x+tank.w()-10-d.r;
+        const top  = tank.y+10+d.r, bottom = tank.y+tank.h()-10-d.r;
+        d.x = clamp(d.x, left, right);
+        d.y = clamp(d.y, top, bottom);
+
+        // shelves (stick, no bounce)
+        for(const s of shelves){
+          const yS = tank.y + s.y;
+          if(d.y + d.r >= yS && d.y + d.r - d.vy*dt < yS){
+            if(isSolidOnShelf(s, d.x)){
+              d.state='onshelf';
+              d.y = yS - d.r;
+              d.shelf = s;
+              d.targetX = nearestGapEdge(s, d.x);
+              d.vx = 0; d.vy = 0;
+              break;
+            }
+          }
+        }
+
+        // bottom pool
+        const poolTopY = poolTopYFromBottomVolume();
+        if(d.y + d.r >= poolTopY){
+          // add drop's area to bottom pool, remove drop
+          const area = Math.PI * d.r * d.r;
+          fluid.bottomVolume += area;
+          d.state='dead';
+        }
+
+      } else if(d.state==='onshelf'){
+        // creep toward the nearest gap according to tilt (prefer downhill)
+        const downhill = Math.sign(gx) || Math.sign(d.targetX - d.x);
+        d.x += downhill * state.slideSpeed * dt;
+        d.y = tank.y + d.shelf.y - d.r;
+
+        // when at/through the gap: fall again
+        if(!isSolidOnShelf(d.shelf, d.x)){
+          d.state='falling';
+          d.vx = 0; d.vy = 0;
+        }
+      }
+    }
+
+    // prune dead drops
+    for(let i=drops.length-1;i>=0;i--) if(drops[i].state==='dead') drops.splice(i,1);
+  }
+
+  // bottom pool surface y based on bottomVolume
+  function poolTopYFromBottomVolume(){
+    const W=tank.w(), H=tank.h();
+    const h = Math.max(0, Math.min(H-40, fluid.bottomVolume / (W)));
+    return tank.y + H - 10 - h + 2;
+  }
+
+  // ---------- Drawing ----------
+  function drawTank(){
+    const W=tank.w(), H=tank.h();
+    const path = roundedRectPath(tank.x,tank.y,W,H,tank.r);
+    // clear
+    ctx.save(); ctx.fillStyle='#0c1624'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.restore();
+    // red tank
+    ctx.save(); ctx.fillStyle='#cf2e2e'; ctx.fill(path); ctx.clip(path);
+    ctx.strokeStyle='rgba(0,0,0,0.35)'; ctx.lineWidth=8; ctx.stroke(path);
+    const grad=ctx.createLinearGradient(0,tank.y,0,tank.y+H);
+    grad.addColorStop(0,'rgba(255,255,255,0.20)');
+    grad.addColorStop(0.08,'rgba(255,255,255,0.12)');
+    grad.addColorStop(0.92,'rgba(0,0,0,0.08)');
+    grad.addColorStop(1,'rgba(0,0,0,0.18)'); ctx.fillStyle=grad; ctx.fill(path);
+    ctx.restore();
+  }
+  function drawDrops(){
+    for(const d of drops){
+      if(d.state==='hanging'){
+        drawTeardrop(d.ax, d.y - d.r*0.6, d.r);
+      } else if(d.state!=='dead'){
+        drawCircle(d.x, d.y, d.r);
+      }
+    }
+  }
+  function drawCircle(x,y,r){
+    ctx.save(); ctx.fillStyle='#2e80ff';
+    ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+    ctx.lineWidth=1.4; ctx.strokeStyle='#0b2e66'; ctx.stroke(); ctx.restore();
+  }
+  function drawTeardrop(ax, rimY, r){
+    const length = r*1.4; const bottomY = rimY + r*0.6 + length; const neck=r*0.55;
+    ctx.save(); ctx.fillStyle='#2e80ff'; ctx.strokeStyle='#0b2e66'; ctx.lineWidth=1.4;
+    const p = new Path2D();
+    p.moveTo(ax - neck, rimY);
+    p.quadraticCurveTo(ax - r*0.9, rimY + length*0.55, ax, bottomY);
+    p.quadraticCurveTo(ax + r*0.9, rimY + length*0.55, ax + neck, rimY);
+    p.closePath(); ctx.fill(p); ctx.stroke(p); ctx.restore();
+  }
+
+  function render(){
+    drawTank();
+    drawShelves();
+    const rim = drawTopPool();          // uses topVolume
+    drawBottomPool();                   // uses bottomVolume
+    return rim;
+  }
+
+  // ---------- Helpers ----------
+  function randBetween(a,b){ return a + Math.random()*(b-a); }
+  function clamp(x,a,b){ return Math.max(a, Math.min(b,x)); }
+  function lerp(a,b,t){ return a + (b-a)*t; }
+
+  // ---------- Main ----------
+  // Seed some hanging drops and start loop
+  for(let i=0;i<4;i++) spawnHanging(tank.x + 30 + i*30);
+  ui();
+
+  let lastT = performance.now();
+  function frame(now){
+    const dt = Math.min(0.033, (now-lastT)/1000); lastT=now;
+    const rim = render();
+    update(dt, rim);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
