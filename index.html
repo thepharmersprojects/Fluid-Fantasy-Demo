@@ -1,1 +1,636 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Fluid Fantasy — Oil Drop Metaballs</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; height: 100%; background: #0b1020; color: #e7efff;
+    font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+  }
+  .wrap {
+    display: grid; grid-template-columns: 320px 1fr; gap: 16px; height: 100%;
+  }
+  .panel {
+    background: #111733; padding: 16px; overflow:auto; border-right: 1px solid #1b2348;
+  }
+  .panel h1 { font-size: 18px; margin: 0 0 10px; }
+  .panel h2 { font-size: 14px; margin: 18px 0 8px; opacity: 0.9; }
+  .row { margin: 10px 0; display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center; }
+  .row label { font-size: 12px; opacity: 0.9; }
+  .row .val { font-variant-numeric: tabular-nums; font-size: 12px; opacity: 0.8; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  button {
+    background: #1a2655; color: #e7efff; border: 1px solid #273581; border-radius: 10px; padding: 6px 10px; cursor: pointer;
+  }
+  button:active { transform: translateY(1px); }
+  .tip { font-size: 12px; opacity: 0.8; line-height: 1.3; }
+  canvas { width: 100%; height: 100%; display:block; background: radial-gradient(1000px 600px at 70% -200px, #1b2450 0%, #0b1020 60%, #080c1a 100%); }
+  .legend {
+    margin-top: 12px; font-size: 12px; opacity: 0.85;
+  }
+  .kbd { padding: 1px 6px; border: 1px solid #2c3a8c; border-radius: 6px; background:#141b3b; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="panel">
+    <h1>Fluid Fantasy — Oil Demo</h1>
+    <div class="tip">
+      Tilt your phone (if asked, allow motion sensors). On desktop, drag to “tilt.”
+      Oil volume is conserved. No bouncing. Shelves make it slosh and drip.
+    </div>
 
+    <h2>Physics</h2>
+    <div class="row">
+      <label for="visc">Viscosity</label>
+      <div class="val" id="viscVal"></div>
+      <input id="visc" type="range" min="0.01" max="0.25" step="0.005" value="0.08" />
+    </div>
+    <div class="row">
+      <label for="tens">Surface Tension</label>
+      <div class="val" id="tensVal"></div>
+      <input id="tens" type="range" min="0.5" max="6.0" step="0.1" value="3.2" />
+    </div>
+    <div class="row">
+      <label for="grav">Gravity</label>
+      <div class="val" id="gravVal"></div>
+      <input id="grav" type="range" min="200" max="1500" step="10" value="900" />
+    </div>
+    <div class="row">
+      <label for="iso">Metaball Iso-Level</label>
+      <div class="val" id="isoVal"></div>
+      <input id="iso" type="range" min="0.10" max="1.80" step="0.02" value="0.68" />
+    </div>
+
+    <h2>Controls</h2>
+    <div class="buttons">
+      <button id="reset">Reset Oil</button>
+      <button id="addDrop">Add Drop</button>
+      <button id="shake">Quick Slosh</button>
+      <button id="toggleShelves">Shelves: On</button>
+    </div>
+    <div class="legend">
+      <div><span class="kbd">Drag</span> to tilt (desktop). <span class="kbd">Double-click</span> to flip.</div>
+      <div>Mobile: allow motion & gently tilt.</div>
+    </div>
+
+    <h2>Notes</h2>
+    <ul class="tip">
+      <li>Oil is rendered as a smooth blob (metaballs). As a drop forms, it stays connected to the pool until it thins and pinches off naturally.</li>
+      <li>We keep particle count constant ⇒ volume is conserved.</li>
+      <li>Obstacles (“shelves”) are solid; oil slides along them, no bounce.</li>
+    </ul>
+
+    <h2>Debug</h2>
+    <div class="row">
+      <label>Particles</label><div class="val" id="dbgParticles">—</div>
+    </div>
+    <div class="row">
+      <label>FPS</label><div class="val" id="dbgFps">—</div>
+    </div>
+  </div>
+
+  <canvas id="c"></canvas>
+</div>
+
+<script>
+(() => {
+  // ----- Canvas & sizing -----
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const DPR = Math.max(1, Math.min(2, devicePixelRatio || 1));
+
+  function sizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.floor(rect.width * DPR);
+    canvas.height = Math.floor(rect.height * DPR);
+  }
+  sizeCanvas();
+  addEventListener('resize', sizeCanvas);
+
+  // ----- UI elements -----
+  const viscEl = document.getElementById('visc');
+  const tensEl = document.getElementById('tens');
+  const gravEl = document.getElementById('grav');
+  const isoEl  = document.getElementById('iso');
+  const dbgParticles = document.getElementById('dbgParticles');
+  const dbgFps = document.getElementById('dbgFps');
+
+  const viscVal = document.getElementById('viscVal');
+  const tensVal = document.getElementById('tensVal');
+  const gravVal = document.getElementById('gravVal');
+  const isoVal  = document.getElementById('isoVal');
+
+  function updateLabels() {
+    viscVal.textContent = Number(viscEl.value).toFixed(3);
+    tensVal.textContent = Number(tensEl.value).toFixed(2);
+    gravVal.textContent = Number(gravEl.value).toFixed(0);
+    isoVal.textContent  = Number(isoEl.value).toFixed(2);
+  }
+  updateLabels();
+  [viscEl, tensEl, gravEl, isoEl].forEach(e => e.addEventListener('input', updateLabels));
+
+  // Buttons
+  const btnReset  = document.getElementById('reset');
+  const btnDrop   = document.getElementById('addDrop');
+  const btnShake  = document.getElementById('shake');
+  const btnShelves= document.getElementById('toggleShelves');
+
+  // ----- Container geometry (rounded rectangle flask) -----
+  function containerPath(ctx, W, H) {
+    const pad = Math.floor(Math.min(W, H) * 0.06);
+    const r   = Math.floor(Math.min(W, H) * 0.12);
+    const neckW = Math.floor(W * 0.24);
+    const neckH = Math.floor(H * 0.10);
+
+    const left   = pad;
+    const right  = W - pad;
+    const top    = pad;
+    const bottom = H - pad;
+
+    const neckLeft  = (W - neckW) / 2;
+    const neckRight = neckLeft + neckW;
+    const neckBottom= top + neckH;
+
+    ctx.beginPath();
+    // neck
+    ctx.moveTo(neckLeft, top);
+    ctx.lineTo(neckRight, top);
+    ctx.lineTo(neckRight, neckBottom);
+    // right wall
+    ctx.arcTo(right, neckBottom, right, bottom, r);
+    ctx.lineTo(right, bottom - r);
+    ctx.arcTo(right, bottom, left, bottom, r);
+    ctx.lineTo(left + r, bottom);
+    ctx.arcTo(left, bottom, left, neckBottom, r);
+    // left wall back to neck
+    ctx.lineTo(left, neckBottom);
+    ctx.lineTo(neckLeft, neckBottom);
+    ctx.closePath();
+
+    return {
+      pad, r, neck: { left: neckLeft, right: neckRight, top, bottom: neckBottom },
+      bounds: { left, right, top, bottom }
+    };
+  }
+
+  // ----- Shelves (fixed horizontal obstacles) -----
+  let shelvesOn = true;
+  function makeShelves(W, H, geom) {
+    const { left, right } = geom.bounds;
+    const gap = (geom.bounds.bottom - geom.neck.bottom) / 4;
+    return [
+      { x1: left + 30, x2: right - 30, y: geom.neck.bottom + gap * 0.9, tilt: -0.03 },
+      { x1: left + 40, x2: right - 40, y: geom.neck.bottom + gap * 1.8, tilt: 0.02 },
+      { x1: left + 50, x2: right - 50, y: geom.neck.bottom + gap * 2.7, tilt: -0.015 },
+    ];
+  }
+
+  // ----- Particle system (SPH-lite) -----
+  const N = 1100;               // particle count (volume is conserved via constant N)
+  const R = 8 * DPR;            // particle render influence radius (metaball influence)
+  const Hs = R * 1.6;           // smoothing length (neighbor radius)
+  const Hs2 = Hs*Hs;
+
+  const parts = new Array(N);
+  const vel   = new Array(N);
+  const tmpV  = new Array(N);
+
+  // Random helper
+  const rand = (a,b)=>a + Math.random()*(b-a);
+
+  // Init positions: fill upper bulb so it drains through neck when tilted
+  function resetOil(geom) {
+    const W = canvas.width, H = canvas.height;
+    const poolW = (geom.bounds.right - geom.bounds.left) * 0.7;
+    const poolH = (geom.bounds.bottom - geom.neck.bottom) * 0.28;
+    const cx = W/2, cy = geom.neck.bottom + poolH * 0.6;
+    for (let i=0;i<N;i++) {
+      parts[i] = {
+        x: cx + rand(-poolW*0.5, poolW*0.5),
+        y: cy + rand(-poolH*0.5, poolH*0.5),
+      };
+      vel[i] = {x: 0, y: 0};
+      tmpV[i]= {x: 0, y: 0};
+    }
+  }
+
+  // Add one drop near neck bottom so it can form & fall
+  function addDrop(geom) {
+    const cx = (geom.neck.left + geom.neck.right)/2;
+    for (let k=0;k<60;k++){
+      const i = Math.floor(Math.random()*N);
+      parts[i].x = cx + rand(-R*0.4, R*0.4);
+      parts[i].y = geom.neck.bottom + rand(-R*0.5, R*0.5);
+      vel[i].x = rand(-5,5);
+      vel[i].y = rand(-10,10);
+    }
+  }
+
+  // ----- Tilt / gravity -----
+  let g = {x:0, y: 900};       // px/s^2 in canvas space
+  // Device orientation
+  if (window.DeviceOrientationEvent && typeof DeviceOrientationEvent.requestPermission === 'function') {
+    // iOS requires a gesture
+    document.body.addEventListener('click', async function grantOnce(){
+      try { await DeviceOrientationEvent.requestPermission(); } catch(e){}
+      window.addEventListener('deviceorientation', (e)=>{
+        // gamma: left/right, beta: front/back
+        const gx = Math.sin((e.gamma||0) * Math.PI/180);
+        const gy = Math.sin((e.beta ||0) * Math.PI/180);
+        const mag = Number(gravEl.value);
+        g.x = gx * mag;
+        g.y = gy * mag;
+      });
+      document.body.removeEventListener('click', grantOnce);
+    }, {once:true});
+  } else if (window.DeviceOrientationEvent) {
+    window.addEventListener('deviceorientation', (e)=>{
+      const gx = Math.sin((e.gamma||0) * Math.PI/180);
+      const gy = Math.sin((e.beta ||0) * Math.PI/180);
+      const mag = Number(gravEl.value);
+      g.x = gx * mag;
+      g.y = gy * mag;
+    });
+  }
+  // Desktop “tilt” via mouse drag
+  let dragging = false, dragStart=null;
+  canvas.addEventListener('pointerdown', e=>{ dragging=true; dragStart={x:e.clientX, y:e.clientY}; canvas.setPointerCapture(e.pointerId); });
+  canvas.addEventListener('pointermove', e=>{
+    if (!dragging) return;
+    const dx = e.clientX - dragStart.x;
+    const dy = e.clientY - dragStart.y;
+    const mag = Number(gravEl.value);
+    g.x = dx * 2;      // scale drag to gravity
+    g.y = dy * 2 + mag*0.1; // slight constant pull downward
+  });
+  canvas.addEventListener('pointerup', ()=>{ dragging=false; });
+  canvas.addEventListener('dblclick', ()=>{ g.x = -g.x; g.y = -g.y; });
+
+  // Quick slosh
+  btnShake.addEventListener('click', ()=>{
+    for (let i=0;i<N;i++){
+      vel[i].x += rand(-200,200);
+      vel[i].y += rand(-200,200);
+    }
+  });
+
+  // Toggle shelves
+  btnShelves.addEventListener('click', ()=>{
+    shelvesOn = !shelvesOn;
+    btnShelves.textContent = `Shelves: ${shelvesOn ? 'On' : 'Off'}`;
+  });
+
+  // ----- Collision with container & shelves (no bounce; slide & stick) -----
+  function pointInContainer(x,y, geom) {
+    // Use ctx.isPointInPath on the prebuilt path for accuracy
+    ctx.save();
+    containerPath(ctx, canvas.width, canvas.height);
+    const inside = ctx.isPointInPath(x,y);
+    ctx.restore();
+    return inside;
+  }
+
+  function projectToInside(p, geom) {
+    // If out of bounds, nudge inside along inward normal approximate: pull toward center
+    const cx = canvas.width/2, cy = (geom.neck.bottom + geom.bounds.bottom)/2;
+    const dx = cx - p.x, dy = cy - p.y;
+    const len = Math.hypot(dx,dy) || 1;
+    p.x += (dx/len) * 2;
+    p.y += (dy/len) * 2;
+  }
+
+  function collideShelves(p, v, shelves) {
+    const slip = 0.92; // slide factor along shelf
+    for (const s of shelves) {
+      const nx = Math.sin(s.tilt), ny = -Math.cos(s.tilt);
+      // Parametric line for shelf from (x1,y) to (x2,y) slightly tilted
+      // Treat as an infinite thin segment with a small thickness
+      const yOnLine = s.y + (p.x - s.x1) * Math.tan(s.tilt);
+      const near = Math.abs(p.y - yOnLine) < R*0.6 && p.x >= s.x1 && p.x <= s.x2;
+      if (near) {
+        // push particle up off the shelf surface
+        const d = (R*0.6) - Math.abs(p.y - yOnLine);
+        p.y -= Math.sign(p.y - yOnLine) * d * 0.8;
+        // remove normal velocity, keep tangential (no bounce)
+        const vn = v.x*nx + v.y*ny;
+        v.x -= vn*nx;
+        v.y -= vn*ny;
+        v.x *= slip; v.y *= slip;
+      }
+    }
+  }
+
+  // ----- Neighbor search (simple grid) -----
+  const grid = {cell: Hs, cols:0, rows:0, buckets:[]};
+  function rebuildGrid() {
+    grid.cols = Math.ceil(canvas.width / grid.cell);
+    grid.rows = Math.ceil(canvas.height/ grid.cell);
+    const nBuckets = grid.cols * grid.rows;
+    if (!grid.buckets || grid.buckets.length !== nBuckets) grid.buckets = Array.from({length:nBuckets}, ()=>[]);
+    else for (let i=0;i<nBuckets;i++) grid.buckets[i].length = 0;
+    for (let i=0;i<N;i++){
+      const c = Math.max(0, Math.min(grid.cols-1, Math.floor(parts[i].x / grid.cell)));
+      const r = Math.max(0, Math.min(grid.rows-1, Math.floor(parts[i].y / grid.cell)));
+      grid.buckets[r*grid.cols + c].push(i);
+    }
+  }
+  function neighbors(i, fn) {
+    const x = parts[i].x, y = parts[i].y;
+    const c = Math.floor(x / grid.cell);
+    const r = Math.floor(y / grid.cell);
+    for (let rr=r-1; rr<=r+1; rr++){
+      if (rr<0||rr>=grid.rows) continue;
+      for (let cc=c-1; cc<=c+1; cc++){
+        if (cc<0||cc>=grid.cols) continue;
+        const bucket = grid.buckets[rr*grid.cols + cc];
+        for (let k=0;k<bucket.length;k++) {
+          const j = bucket[k];
+          if (j===i) continue;
+          fn(j);
+        }
+      }
+    }
+  }
+
+  // ----- Forces: gravity, viscosity (drag), cohesion (surface tension) -----
+  function step(dt, geom, shelves) {
+    const visc = Number(viscEl.value);     // higher = thicker (more damping)
+    const tens = Number(tensEl.value);     // cohesion strength
+    const gmag = Number(gravEl.value);
+    // Keep g magnitude roughly in range when sliders change
+    const gScale = Math.max(200, gmag) / 900;
+    const gx = g.x * gScale, gy = g.y * gScale;
+
+    // Zero temp forces
+    for (let i=0;i<N;i++){ tmpV[i].x = 0; tmpV[i].y = 0; }
+
+    // Cohesion (pairwise attraction with short-range repulsion)
+    rebuildGrid();
+    for (let i=0;i<N;i++){
+      const xi = parts[i].x, yi = parts[i].y;
+      let cx=0, cy=0, cnt=0;
+      neighbors(i, (j)=>{
+        const dx = parts[j].x - xi;
+        const dy = parts[j].y - yi;
+        const d2 = dx*dx + dy*dy;
+        if (d2 > Hs2) return;
+        const d = Math.sqrt(d2) || 1;
+        // Kernel weights (poly6-like blend)
+        const q = 1 - d/Hs;
+        // Attractive when mid/long range; slight repulsive when very close to prevent clumping collapse
+        const att = tens * q*q;
+        const rep = (d < R*0.65) ? (tens * 2.2 * (1 - d/(R*0.65))) : 0;
+        const f = (att - rep);
+        cx += (dx/d) * f;
+        cy += (dy/d) * f;
+        cnt++;
+      });
+      if (cnt>0){ tmpV[i].x += cx/cnt; tmpV[i].y += cy/cnt; }
+    }
+
+    // Integrate with gravity + viscosity damping
+    const damp = Math.max(0, 1 - visc * dt*6); // frame-rate independent-ish
+    for (let i=0;i<N;i++){
+      vel[i].x = (vel[i].x + (gx + tmpV[i].x) * dt) * damp;
+      vel[i].y = (vel[i].y + (gy + tmpV[i].y) * dt) * damp;
+
+      parts[i].x += vel[i].x * dt;
+      parts[i].y += vel[i].y * dt;
+    }
+
+    // Collide with shelves
+    if (shelvesOn) {
+      for (let i=0;i<N;i++) collideShelves(parts[i], vel[i], shelves);
+    }
+
+    // Keep inside container (no bounce; slide)
+    for (let i=0;i<N;i++){
+      if (!pointInContainer(parts[i].x, parts[i].y, geom)){
+        projectToInside(parts[i], geom);
+        // Damp motion when touching wall to avoid bounce
+        vel[i].x *= 0.6; vel[i].y *= 0.6;
+      }
+    }
+  }
+
+  // ----- Metaball field & marching squares to draw single oil shape -----
+  const ISO_RES = 2; // pixels per field sample
+  function drawOil(geom, shelves) {
+    const W = canvas.width, H = canvas.height;
+
+    // Background glass & shelves
+    ctx.save();
+    ctx.lineWidth = 2 * DPR;
+    ctx.strokeStyle = 'rgba(90,110,220,0.45)';
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    containerPath(ctx, W, H);
+    ctx.fill();
+    ctx.stroke();
+
+    // Shelves
+    if (shelvesOn) {
+      ctx.strokeStyle = 'rgba(160,180,255,0.38)';
+      ctx.lineWidth = 1.5 * DPR;
+      for (const s of shelves) {
+        ctx.beginPath();
+        ctx.moveTo(s.x1, s.y);
+        ctx.lineTo(s.x2, s.y + (s.x2 - s.x1)*Math.tan(s.tilt));
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // Build scalar field
+    const stepPx = ISO_RES * DPR;
+    const cols = Math.floor(W / stepPx)+1;
+    const rows = Math.floor(H / stepPx)+1;
+    const field = new Float32Array(cols*rows);
+
+    // Precompute R^2 and strength
+    const isoLevel = Number(isoEl.value); // threshold for blob edge
+    const r2 = R*R;
+    for (let r=0; r<rows; r++){
+      const y = r * stepPx;
+      for (let c=0; c<cols; c++){
+        const x = c * stepPx;
+        // skip computation outside container for speed
+        if (!pointInContainer(x,y, geom)) { field[r*cols+c] = 0; continue; }
+        // Sum metaball contributions
+        let sum = 0;
+        // sample neighbor buckets only
+        const cix = Math.floor(x / grid.cell);
+        const riy = Math.floor(y / grid.cell);
+        for (let rr=riy-1; rr<=riy+1; rr++){
+          if (rr<0||rr>=grid.rows) continue;
+          for (let cc=cix-1; cc<=cix+1; cc++){
+            if (cc<0||cc>=grid.cols) continue;
+            const bucket = grid.buckets[rr*grid.cols + cc];
+            for (let k=0;k<bucket.length;k++){
+              const i = bucket[k];
+              const dx = x - parts[i].x;
+              const dy = y - parts[i].y;
+              const d2 = dx*dx + dy*dy;
+              if (d2 < r2) {
+                // smooth kernel: (1 - d^2/R^2)^2
+                const t = 1 - d2/r2;
+                sum += t*t;
+              }
+            }
+          }
+        }
+        field[r*cols + c] = sum;
+      }
+    }
+
+    // Marching squares
+    ctx.save();
+    ctx.clip(); // stay within container
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#4aa3ff';
+    ctx.strokeStyle = '#02142a';
+    ctx.lineWidth = 1 * DPR;
+
+    for (let r=0; r<rows-1; r++){
+      for (let c=0; c<cols-1; c++){
+        const i = r*cols + c;
+        const a = field[i] >= isoLevel;
+        const b = field[i+1] >= isoLevel;
+        const d = field[i+cols] >= isoLevel;
+        const e = field[i+cols+1] >= isoLevel;
+        const idx = (a?1:0) | (b?2:0) | (d?4:0) | (e?8:0);
+        if (idx===0 || idx===15) continue;
+
+        const x = c*stepPx, y = r*stepPx, s = stepPx;
+
+        // interpolate helper
+        const interp = (f1,f2, off) => {
+          const v1 = f1 - isoLevel, v2 = f2 - isoLevel;
+          const t = v1/(v1 - v2 + 1e-6);
+          return off + t*s;
+        };
+
+        // Collect segment(s) for this cell
+        const fA = field[i],        fB = field[i+1],
+              fD = field[i+cols],  fE = field[i+cols+1];
+
+        // edges midpoints
+        const topX    = interp(fA, fB, x);
+        const bottomX = interp(fD, fE, x);
+        const leftY   = interp(fA, fD, y);
+        const rightY  = interp(fB, fE, y);
+
+        ctx.beginPath();
+        switch (idx) {
+          case 1: case 14:
+            // between A-D and A-B
+            moveLine(x, leftY, topX, y);
+            break;
+          case 2: case 13:
+            moveLine(topX, y, x+s, rightY);
+            break;
+          case 3: case 12:
+            moveLine(x, leftY, x+s, rightY);
+            break;
+          case 4: case 11:
+            moveLine(x, leftY, bottomX, y+s);
+            break;
+          case 5:
+            // two segments: A-B & D-E (saddle) — draw as a filled polygon with both
+            moveLine(topX, y, x, leftY);
+            ctx.fill();
+            ctx.beginPath();
+            moveLine(x+s, rightY, bottomX, y+s);
+            break;
+          case 6: case 9:
+            moveLine(topX, y, bottomX, y+s);
+            break;
+          case 7: case 8:
+            moveLine(x+s, rightY, bottomX, y+s);
+            break;
+          case 10:
+            // two segments: A-D & B-E (saddle)
+            moveLine(x, leftY, bottomX, y+s);
+            ctx.fill();
+            ctx.beginPath();
+            moveLine(topX, y, x+s, rightY);
+            break;
+        }
+        ctx.fill();
+      }
+    }
+
+    // subtle edge outline
+    ctx.globalAlpha = 0.35;
+    ctx.stroke();
+    ctx.restore();
+
+    // Gloss overlay
+    ctx.save();
+    containerPath(ctx, W, H);
+    const grd = ctx.createLinearGradient(0, 0, 0, H);
+    grd.addColorStop(0.0, 'rgba(255,255,255,0.10)');
+    grd.addColorStop(0.2, 'rgba(255,255,255,0.04)');
+    grd.addColorStop(1.0, 'rgba(255,255,255,0.00)');
+    ctx.fillStyle = grd;
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function moveLine(x1,y1,x2,y2){
+    ctx.moveTo(x1,y1);
+    ctx.lineTo(x2,y2);
+  }
+
+  // ----- Main loop -----
+  let last=performance.now(), fpsSamp=0, fpsCount=0;
+  function loop(now){
+    const dt = Math.min(0.033, (now-last)/1000); // clamp
+    last = now;
+
+    // Update gravity magnitude in case slider changed (orientation handlers use value too)
+    const mag = Number(gravEl.value);
+    const glen = Math.hypot(g.x, g.y) || 1;
+    if (glen > 0) {
+      const scale = mag / glen;
+      g.x *= scale; g.y *= scale;
+    }
+
+    const geom = containerPath(ctx, canvas.width, canvas.height);
+    const shelves = makeShelves(canvas.width, canvas.height, geom);
+
+    step(dt, geom, shelves);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    drawOil(geom, shelves);
+
+    // Debug
+    fpsSamp += dt; fpsCount++;
+    if (fpsSamp >= 0.5) {
+      dbgFps.textContent = (fpsCount/fpsSamp).toFixed(0);
+      fpsSamp = 0; fpsCount = 0;
+    }
+    dbgParticles.textContent = N;
+
+    requestAnimationFrame(loop);
+  }
+
+  // ----- Wire buttons -----
+  btnReset.addEventListener('click', ()=>{
+    const geom = containerPath(ctx, canvas.width, canvas.height);
+    resetOil(geom);
+  });
+  btnDrop.addEventListener('click', ()=>{
+    const geom = containerPath(ctx, canvas.width, canvas.height);
+    addDrop(geom);
+  });
+
+  // ----- First run -----
+  const geom0 = containerPath(ctx, canvas.width, canvas.height);
+  resetOil(geom0);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
