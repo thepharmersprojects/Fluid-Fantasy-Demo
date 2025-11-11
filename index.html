@@ -1,1 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<title>Fluid Fantasy – Slosh + Necking Drops (stable)</title>
+<style>
+  :root{
+    color-scheme: dark;
+    --bg:#0b1420;
+    --face1:#c6352b; --face2:#a42e27; --stroke:#7b1f1a;
+    --shelf:#eef1f6;
+    /* If your site theme overwrites these, JS now has fallbacks */
+    --oil:#64a8ff;        /* light center */
+    --oil-edge:#0f3c89;   /* dark rim */
+  }
+  html,body{margin:0;background:var(--bg);font:16px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;display:flex;flex-direction:column;align-items:center;gap:12px}
+  .wrap{width:min(430px,92vw)}
+  .phone{position:relative;aspect-ratio:9/16;background:linear-gradient(#1a2230,#0c1422);border-radius:28px;box-shadow:0 14px 40px rgba(0,0,0,.55), inset 0 0 0 10px #0e1724;padding:18px}
+  canvas{width:100%;height:100%;display:block;border-radius:22px}
+  .panel{background:#0f1726;border:1px solid #1e2a42;border-radius:12px;padding:10px 12px;color:#cfd7e7}
+  .row{display:grid;grid-template-columns:1fr auto;align-items:center;gap:10px;margin:6px 0}
+  input[type=range]{width:52vw;max-width:440px}
+  small{color:#9fb0cf}
+  button{background:#1f2a44;color:#e8f0ff;border:1px solid #32466e;border-radius:8px;padding:6px 10px;cursor:pointer}
+</style>
+</head>
+<body>
+  <div class="wrap phone"><canvas id="sim"></canvas></div>
+  <div class="wrap panel">
+    <div class="row"><label>Outlet size</label><input id="out" type="range" min="2" max="20" step="1" value="8"></div>
+    <div class="row"><label>Tension (detach mass)</label><input id="ten" type="range" min="0" max="1" step="0.01" value="0.6"></div>
+    <div class="row"><label>Viscosity (drag)</label><input id="vis" type="range" min="0" max="1" step="0.01" value="0.35"></div>
+    <div class="row"><label>Sim Tilt (◀︎ / ▶︎)</label><input id="tilt" type="range" min="-0.9" max="0.9" step="0.01" value="0"></div>
+    <div class="row"><span></span><button id="reset">Reset</button></div>
+    <small>Top reservoir sloshes and empties only through the outlet. Drops form by necking, fall as tear-drops, and spread at the bottom. No bounce. Volume conserved.</small>
+  </div>
 
+<script>
+(() => {
+  // ===== Canvas/setup =====
+  const cvs = document.getElementById('sim');
+  const ctx = cvs.getContext('2d');
+  const DPR = Math.max(1, Math.min(2, devicePixelRatio||1));
+  let W=360, H=640;
+  const pad = 20*DPR, rr = 20*DPR;
+
+  const $out = document.getElementById('out');
+  const $ten = document.getElementById('ten');
+  const $vis = document.getElementById('vis');
+  const $tilt= document.getElementById('tilt');
+  const $reset= document.getElementById('reset');
+
+  function resizeCanvas(){
+    const b=cvs.getBoundingClientRect();
+    W=Math.round(b.width*DPR); H=Math.round(b.height*DPR);
+    cvs.width=W; cvs.height=H;
+  }
+
+  // ===== World =====
+  const world = {
+    box:null, shelf:null, outletX:0,
+    NX: 120,
+    resH:[], poolH:[], dx:1,
+    neck:{ mass:0, len:0, radius:0 },
+    drops:[],
+    init(){
+      this.box = {x:pad, y:pad, w:W-2*pad, h:H-2*pad, r:rr};
+      const sx=this.box.x+8*DPR, sy=this.box.y+this.box.h*0.16, sw=this.box.w-16*DPR, sh=8*DPR;
+      this.shelf={x:sx,y:sy,w:sw,h:sh};
+      this.outletX = this.shelf.x + this.shelf.w/2;
+
+      this.dx = this.shelf.w/this.NX;
+      // Start with clearly visible reservoir height (60–70 px)
+      const startHead = Math.max(60*DPR, this.shelf.y - (this.box.y+10*DPR));
+      this.resH = new Array(this.NX).fill(startHead);
+      // soft taper near walls (meniscus hint)
+      for(let i=0;i<8;i++){ this.resH[i]*=0.7; this.resH[this.NX-1-i]*=0.7; }
+
+      this.poolH = new Array(this.NX).fill(0);
+      this.neck.mass=0; this.neck.len=0; this.neck.radius=0;
+      this.drops.length=0;
+    },
+    outW(){ return parseFloat($out.value)*DPR; }
+  };
+
+  // ===== Physics =====
+  const DT = 1/60, G=900*DPR;
+  function gvec(){
+    const t=parseFloat($tilt.value);
+    const gx=t, gy=1; const m=Math.hypot(gx,gy);
+    return {ax:G*gx/m, ay:G*gy/m};
+  }
+  function clamp(v,a,b){ return Math.max(a, Math.min(b,v)); }
+  function slosh(Harr, bias, k){
+    const N=Harr.length, tmp=new Array(N).fill(0);
+    for(let i=0;i<N-1;i++){
+      const slope=Harr[i]-Harr[i+1];
+      const f = k*(slope + bias);
+      tmp[i]   -= f;
+      tmp[i+1] += f;
+    }
+    for(let i=0;i<N;i++) Harr[i]=Math.max(0, Harr[i]+tmp[i]);
+  }
+
+  function step(){
+    const visc = 0.05 + 1.2*parseFloat($vis.value);
+    const tenMul = 0.6 + 1.5*parseFloat($ten.value);
+    const {ax,ay} = gvec();
+    const bias = ax * 0.35;
+
+    slosh(world.resH,  bias, 0.22);
+    slosh(world.poolH, bias, 0.35);
+
+    // Outlet transfer
+    const iOut = clamp(Math.floor((world.outletX - world.shelf.x)/world.dx),0,world.NX-1);
+    const head = world.resH[iOut];
+    if(head>0){
+      const A = Math.max(2*DPR, world.outW());
+      const c = 0.35;
+      const flow = c * A * Math.sqrt(head) * DT;
+      world.resH[iOut] = Math.max(0, world.resH[iOut] - (flow / world.dx));
+      world.neck.mass   += flow;
+      world.neck.len     = clamp(world.neck.len + 0.9*DT*DPR + Math.sqrt(head)*0.02, 2*DPR, 36*DPR);
+      world.neck.radius  = clamp(world.neck.radius + 0.6*DT*DPR, 2*DPR, 14*DPR);
+    } else {
+      world.neck.len   = Math.max(0, world.neck.len - 10*DT);
+      world.neck.radius= Math.max(1*DPR, world.neck.radius - 14*DT);
+    }
+
+    // Detach
+    const detachThresh = (140*DPR*DPR) * tenMul;
+    if(world.neck.mass > detachThresh){
+      const r = Math.sqrt(world.neck.mass)*0.52;
+      world.drops.push({ x:world.outletX, y:world.shelf.y+world.shelf.h/2+world.neck.len+r*0.2, vx:ax*DT*12, vy:40*DPR, r });
+      world.neck.mass=0; world.neck.len=world.neck.radius*0.4;
+    }
+
+    // Advance drops & add to bottom pool
+    const wallL=world.box.x+6*DPR, wallR=world.box.x+world.box.w-6*DPR;
+    const floorY=world.box.y+world.box.h-6*DPR;
+    for(const d of world.drops){
+      d.vx += ax*DT; d.vy += ay*DT;
+      d.vx *= (1 - visc*DT); d.vy *= (1 - visc*DT);
+      d.x  += d.vx*DT; d.y  += d.vy*DT;
+      if(d.x<wallL){ d.x=wallL; d.vx=0; }
+      if(d.x>wallR){ d.x=wallR; d.vx=0; }
+      if(d.y>=floorY){
+        const i=clamp(Math.floor((d.x - world.shelf.x)/world.dx),0,world.NX-1);
+        const vol = d.r*d.r;
+        world.poolH[i] += vol / world.dx; // then slosh spreads it
+        d.r=0;
+      }
+    }
+    for(let i=world.drops.length-1;i>=0;i--) if(world.drops[i].r<=0) world.drops.splice(i,1);
+  }
+
+  // ===== Drawing =====
+  function rrRect(c,x,y,w,h,r){
+    c.beginPath();
+    c.moveTo(x+r,y);
+    c.arcTo(x+w,y,x+w,y+h,r);
+    c.arcTo(x+w,y+h,x,y+h,r);
+    c.arcTo(x,y+h,x,y,r);
+    c.arcTo(x,y,x+w,y,r);
+    c.closePath();
+  }
+  // Robust color getter with safe fallbacks
+  function cssVar(name, fallback){
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+  const fallbackOilCenter = '#64a8ff';
+  const fallbackOilEdge   = '#0f3c89';
+
+  function drawDevice(){
+    const b=world.box;
+    const g=ctx.createLinearGradient(0,b.y,0,b.y+b.h);
+    g.addColorStop(0,'#d7443b'); g.addColorStop(1,'#a42e27');
+    rrRect(ctx,b.x,b.y,b.w,b.h,b.r); ctx.fillStyle=g; ctx.fill();
+    ctx.lineWidth=6*DPR; ctx.strokeStyle='#7b1f1a'; ctx.stroke();
+  }
+  function drawShelf(){
+    const s=world.shelf, rr=s.h/2, gap=world.outW(), gapX=world.outletX-gap/2;
+    ctx.save(); ctx.fillStyle=cssVar('--shelf','#eef1f6');
+    rrRect(ctx,s.x, s.y, gapX-s.x, s.h, rr); ctx.fill();
+    rrRect(ctx,gapX+gap, s.y, s.x+s.w-(gapX+gap), s.h, rr); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawReservoir(){
+    const s=world.shelf, x0=s.x, topY = y=> s.y - y;
+    const center=cssVar('--oil', fallbackOilCenter);
+    const edge  =cssVar('--oil-edge', fallbackOilEdge);
+
+    // visible? (sum heights)
+    let sum=0; for(const h of world.resH) sum+=h;
+    if(sum<=0) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x0, s.y);
+    for(let i=0;i<world.NX;i++){
+      const x=x0+i*world.dx; ctx.lineTo(x, topY(world.resH[i]));
+    }
+    ctx.lineTo(x0+world.NX*world.dx, s.y);
+    ctx.closePath();
+    ctx.fillStyle=center; ctx.fill();
+    ctx.lineWidth=5*DPR; ctx.strokeStyle=edge; ctx.stroke();
+    ctx.restore();
+
+    // neck
+    if(world.neck.len>1){
+      const cx=world.outletX, cy=s.y+s.h/2;
+      const len=world.neck.len, r=Math.max(1*DPR, world.neck.radius);
+      ctx.save();
+      ctx.fillStyle=center; ctx.strokeStyle=edge; ctx.lineWidth=2*DPR;
+      ctx.beginPath();
+      ctx.moveTo(cx - r*0.5, cy);
+      ctx.bezierCurveTo(cx - r*0.35, cy + len*0.35, cx - r*0.2, cy + len*0.75, cx, cy + len);
+      ctx.bezierCurveTo(cx + r*0.2, cy + len*0.75, cx + r*0.35, cy + len*0.35, cx + r*0.5, cy);
+      ctx.closePath(); ctx.fill(); ctx.stroke();
+
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + len + r*0.8, r*1.1, r*0.9, 0, 0, Math.PI*2);
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function drawBottomPool(){
+    const b=world.box, x0=world.shelf.x, base=b.y+b.h-6*DPR;
+    const center=cssVar('--oil', fallbackOilCenter);
+    const edge  =cssVar('--oil-edge', fallbackOilEdge);
+
+    let sum=0; for(const h of world.poolH) sum+=h; if(sum<=0) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x0, base);
+    for(let i=0;i<world.NX;i++){
+      const x=x0+i*world.dx; ctx.lineTo(x, base - world.poolH[i]);
+    }
+    ctx.lineTo(x0+world.NX*world.dx, base);
+    ctx.closePath();
+
+    const lg = ctx.createLinearGradient(x0,0,x0+world.NX*world.dx,0);
+    lg.addColorStop(0, edge); lg.addColorStop(0.15, center);
+    lg.addColorStop(0.85, center); lg.addColorStop(1, edge);
+    ctx.fillStyle=lg; ctx.fill();
+    ctx.lineWidth=4*DPR; ctx.strokeStyle=edge; ctx.stroke();
+    ctx.restore();
+  }
+
+  function drawDrops(){
+    const center=cssVar('--oil', fallbackOilCenter);
+    const edge  =cssVar('--oil-edge', fallbackOilEdge);
+    ctx.save(); ctx.shadowColor='rgba(0,0,0,.25)'; ctx.shadowBlur=10*DPR;
+    for(const d of world.drops){
+      const ang = Math.atan2(d.vy, d.vx);
+      ctx.beginPath();
+      ctx.ellipse(d.x, d.y, d.r*1.15, d.r*0.92, ang, 0, Math.PI*2);
+      const g = ctx.createRadialGradient(d.x, d.y, 0, d.x, d.y, d.r*1.25);
+      g.addColorStop(0, center); g.addColorStop(1, edge);
+      ctx.fillStyle=g; ctx.fill();
+      ctx.lineWidth=2*DPR; ctx.strokeStyle=edge; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // ===== Main loop =====
+  function frame(t){
+    step();
+    ctx.clearRect(0,0,W,H);
+    drawDevice(); drawShelf(); drawBottomPool(); drawDrops(); drawReservoir();
+    requestAnimationFrame(frame);
+  }
+
+  // ----- Boot sequence -----
+  function boot(){
+    resizeCanvas();
+    world.init();     // <- explicit init (fixes “nothing draws” on some pages)
+    requestAnimationFrame(frame);
+  }
+  if(document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot);
+  } else {
+    boot();
+  }
+  window.addEventListener('resize', () => { resizeCanvas(); world.init(); });
+
+  $reset.addEventListener('click', () => world.init());
+  $out.addEventListener('input', () => world.init()); // rebuilding outlet is easier
+})();
+</script>
+</body>
+</html>
